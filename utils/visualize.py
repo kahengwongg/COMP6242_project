@@ -11,6 +11,16 @@ from torchvision.utils import make_grid, save_image
 
 
 def save_samples(generator, fixed_noise, epoch, save_dir, nrow=8):
+    """
+    Save generated sample images.
+    
+    Args:
+        generator: generator model
+        fixed_noise: fixed noise vector
+        epoch: current epoch
+        save_dir: save directory
+        nrow: number of images per row
+    """
     generator.eval()
     
     with torch.no_grad():
@@ -29,6 +39,15 @@ def save_samples(generator, fixed_noise, epoch, save_dir, nrow=8):
 
 
 def plot_loss_curves(g_losses, d_losses, save_path, title='Training Loss'):
+    """
+    Plot loss curves.
+    
+    Args:
+        g_losses: Generator loss list
+        d_losses: Discriminator loss list
+        save_path: save path
+        title: chart title
+    """
     plt.figure(figsize=(10, 6))
     plt.plot(g_losses, label='Generator Loss', alpha=0.8)
     plt.plot(d_losses, label='Discriminator Loss', alpha=0.8)
@@ -45,6 +64,14 @@ def plot_loss_curves(g_losses, d_losses, save_path, title='Training Loss'):
 
 
 def plot_multiple_loss_curves(losses_dict, save_path, title='Training Loss Comparison'):
+    """
+    Plot multiple loss curves comparison chart.
+    
+    Args:
+        losses_dict: dict, key is experiment name, value is (g_losses, d_losses)
+        save_path: save path
+        title: chart title
+    """
     fig, axes = plt.subplots(1, 2, figsize=(16, 6))
     
     # Generator Loss
@@ -74,6 +101,17 @@ def plot_multiple_loss_curves(losses_dict, save_path, title='Training Loss Compa
 
 
 def create_sample_grid(images, nrow=8, title=None):
+    """
+    Create sample grid image.
+    
+    Args:
+        images: image tensor [B, C, H, W]
+        nrow: images per row
+        title: title
+    
+    Returns:
+        matplotlib figure
+    """
     # Create grid
     grid = make_grid(images, nrow=nrow, normalize=True, value_range=(-1, 1))
     
@@ -92,6 +130,14 @@ def create_sample_grid(images, nrow=8, title=None):
 
 
 def save_comparison_grid(images_dict, save_path, nrow=4):
+    """
+    Save multiple sample comparison grids.
+    
+    Args:
+        images_dict: dict, key is experiment name, value is image tensor
+        save_path: save path
+        nrow: number of rows per sample group
+    """
     n_models = len(images_dict)
     n_samples = list(images_dict.values())[0].size(0)
     
@@ -114,10 +160,28 @@ def save_comparison_grid(images_dict, save_path, nrow=4):
 
 
 def denormalize(images):
+    """
+    Convert normalized images back to [0, 1] range.
+    
+    Args:
+        images: normalized images [-1, 1]
+    
+    Returns:
+        denormalized images [0, 1]
+    """
     return (images + 1) / 2
 
 
 def compute_loss_stats(losses):
+    """
+    Compute loss statistics.
+    
+    Args:
+        losses: loss list
+    
+    Returns:
+        dict containing mean, std, min, max
+    """
     losses_np = np.array(losses)
     
     return {
@@ -129,6 +193,14 @@ def compute_loss_stats(losses):
 
 
 def plot_fid_comparison(fid_scores, save_path, title='FID Score Comparison'):
+    """
+    Plot FID score comparison bar chart.
+    
+    Args:
+        fid_scores: dict, key is experiment name, value is FID score
+        save_path: save path
+        title: chart title
+    """
     names = list(fid_scores.keys())
     scores = list(fid_scores.values())
     

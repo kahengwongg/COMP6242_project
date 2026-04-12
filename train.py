@@ -1,3 +1,13 @@
+"""
+Unified training entry point.
+Supports 4 models (dcgan, wgan_gp, attention_gan, combined) and 3 conditions (full_data, low_data, noisy)
+
+Usage:
+    python train.py --model dcgan --condition full_data --seed 42
+    python train.py --model wgan_gp --condition low_data --seed 42
+    python train.py --model attention_gan --condition noisy --seed 42
+"""
+
 import os
 import argparse
 import time
@@ -404,3 +414,62 @@ def train(args):
     writer.close()
     
     return exp_dir
+
+
+def main():
+    parser = argparse.ArgumentParser(description='GAN Training Script')
+    
+    # Model parameters
+    parser.add_argument('--model', type=str, default='dcgan',
+                        choices=['dcgan', 'wgan_gp', 'attention_gan', 'combined'],
+                        help='Model type')
+    parser.add_argument('--z_dim', type=int, default=100,
+                        help='Latent vector dimension')
+    parser.add_argument('--channels', type=int, default=3,
+                        help='Image channels')
+    parser.add_argument('--img_size', type=int, default=64,
+                        help='Image size')
+    
+    # Experimental conditions
+    parser.add_argument('--condition', type=str, default='full_data',
+                        choices=['full_data', 'low_data', 'noisy'],
+                        help='Experimental condition')
+    parser.add_argument('--seed', type=int, default=42,
+                        help='Random seed')
+    
+    # Training parameters
+    parser.add_argument('--epochs', type=int, default=100,
+                        help='Number of training epochs')
+    parser.add_argument('--batch_size', type=int, default=64,
+                        help='Batch size')
+    parser.add_argument('--num_workers', type=int, default=4,
+                        help='Number of data loading workers')
+    
+    # WGAN-GP parameters
+    parser.add_argument('--lambda_gp', type=float, default=10.0,
+                        help='Gradient penalty coefficient')
+    parser.add_argument('--n_critic', type=int, default=5,
+                        help='D:G update ratio')
+    
+    # Noisy condition parameters
+    parser.add_argument('--noise_std', type=float, default=0.1,
+                        help='Noise standard deviation')
+    
+    # Path parameters
+    parser.add_argument('--data_dir', type=str, default='data/anime_faces',
+                        help='Dataset directory')
+    parser.add_argument('--exp_dir', type=str, default='experiments',
+                        help='Experiment results directory')
+    parser.add_argument('--save_freq', type=int, default=10,
+                        help='Save frequency (epochs)')
+    parser.add_argument('--resume', type=str, default=None,
+                        help='Resume training from checkpoint path')
+    
+    args = parser.parse_args()
+    
+    # Start training
+    train(args)
+
+
+if __name__ == '__main__':
+    main()

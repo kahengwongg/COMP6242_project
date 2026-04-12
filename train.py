@@ -20,14 +20,12 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-# Import models
 from models.dcgan import DCGANGenerator, DCGANDiscriminator
 from models.wgan_gp import WGGANGenerator, WGGANDiscriminator, compute_gradient_penalty as wgan_gp_compute_gp
 from models.attention_gan import AttentionGANGenerator, AttentionGANDiscriminator
 from models.combined import CombinedGenerator, CombinedDiscriminator, compute_gradient_penalty as combined_compute_gp
 from models.layers import weights_init
 
-# Import utilities
 from utils.data_loader import get_dataloader, set_seed
 from utils.visualize import save_samples, plot_loss_curves, compute_loss_stats
 
@@ -42,18 +40,7 @@ def get_mem_mb():
 
 
 def get_models(model_name, z_dim=100, channels=3, device='cuda'):
-    """
-    Create Generator and Discriminator based on model name.
-    
-    Args:
-        model_name: model name ('dcgan', 'wgan_gp', 'attention_gan', 'combined')
-        z_dim: latent vector dimension
-        channels: image channels
-        device: device
-    
-    Returns:
-        (generator, discriminator)
-    """
+    """Return (G, D) for the given model name, moved to device and weight-initialised."""
     model_name = model_name.lower()
     
     if model_name == 'dcgan':
@@ -71,7 +58,6 @@ def get_models(model_name, z_dim=100, channels=3, device='cuda'):
     else:
         raise ValueError(f"Unknown model: {model_name}")
     
-    # Initialize weights
     G.apply(weights_init)
     D.apply(weights_init)
     
@@ -79,29 +65,15 @@ def get_models(model_name, z_dim=100, channels=3, device='cuda'):
 
 
 def get_optimizers(model_name, G, D, lr_dcgan=2e-4, lr_wgan=1e-4):
-    """
-    Create optimizers based on model type.
-    
-    Args:
-        model_name: model name
-        G: Generator
-        D: Discriminator
-        lr_dcgan: DCGAN learning rate
-        lr_wgan: WGAN-GP learning rate
-    
-    Returns:
-        (g_optimizer, d_optimizer)
-    """
+    """Return (g_optimizer, d_optimizer) with hyperparameters suited to the model family."""
     model_name = model_name.lower()
     
     if model_name in ['dcgan', 'attention_gan']:
-        # DCGAN uses Adam, β1=0.5 (Radford et al. 2016)
+        # β1=0.5, Radford et al. 2016
         g_optimizer = optim.Adam(G.parameters(), lr=lr_dcgan, betas=(0.5, 0.999))
         d_optimizer = optim.Adam(D.parameters(), lr=lr_dcgan, betas=(0.5, 0.999))
     else:
-        # WGAN-GP uses Adam with β1=0, β2=0.9 (Gulrajani et al. 2017, §4).
-        # High first-moment momentum (β1=0.5) can destabilise the critic when
-        # combined with gradient penalty; zeroing β1 avoids stale momentum.
+        # β1=0, β2=0.9; non-zero β1 destabilises the critic with GP (Gulrajani et al. 2017)
         g_optimizer = optim.Adam(G.parameters(), lr=lr_wgan, betas=(0.0, 0.9))
         d_optimizer = optim.Adam(D.parameters(), lr=lr_wgan, betas=(0.0, 0.9))
     
@@ -109,22 +81,18 @@ def get_optimizers(model_name, G, D, lr_dcgan=2e-4, lr_wgan=1e-4):
 
 
 def train_dcgan_step(G, D, real_images, g_optimizer, d_optimizer, z_dim, device, criterion):
-    """
-    DCGAN single training step (BCE Loss)
-    """
+    """One DCGAN update: D step then G step, both with BCE loss."""
     batch_size = real_images.size(0)
     
-    # Train Discriminator
+    # D step
     d_optimizer.zero_grad()
     
-    # Real images
     real_labels = torch.ones(batch_size, 1, device=device)
     d_real_output = D(real_images)
     d_real_loss = criterion(d_real_output, real_labels)
     
-    # Generated images
     z = torch.randn(batch_size, z_dim, device=device)
-    fake_images = G(z).detach()  # detach so D is trained on fake images without backpropagating into G
+    fake_images = G(z).detach()  # detach: no G gradients during D update
     fake_labels = torch.zeros(batch_size, 1, device=device)
     d_fake_output = D(fake_images)
     d_fake_loss = criterion(d_fake_output, fake_labels)
@@ -133,13 +101,13 @@ def train_dcgan_step(G, D, real_images, g_optimizer, d_optimizer, z_dim, device,
     d_loss.backward()
     d_optimizer.step()
     
-    # Train Generator
+    # G step
     g_optimizer.zero_grad()
     
     z = torch.randn(batch_size, z_dim, device=device)
-    fake_images = G(z)  # no detach so gradients from D(fake_images) can backpropagate into G
+    fake_images = G(z)
     g_output = D(fake_images)
-    g_loss = criterion(g_output, real_labels)  # Want D to classify generated images as real
+    g_loss = criterion(g_output, real_labels)  # G wants D to output 1 on fakes
     
     g_loss.backward()
     g_optimizer.step()
@@ -154,36 +122,31 @@ def train_wgan_gp_step(G, D, real_images, g_optimizer, d_optimizer, z_dim, devic
                        lambda_gp=10, n_critic=5, compute_gp_func=wgan_gp_compute_gp,
                        critic_step=0):
     """
-    WGAN-GP single training step (Wasserstein Loss + Gradient Penalty)
-    D:G update ratio = n_critic:1
-
-    Args:
-        critic_step: current batch step count; G is updated when critic_step % n_critic == 0
+    One WGAN-GP update. Critic runs every batch; G runs every n_critic batches.
+    critic_step: total critic updates so far (G updates when critic_step % n_critic == 0).
     """
     batch_size = real_images.size(0)
     
-    # Train Discriminator (Critic)
+    # Critic step
     d_optimizer.zero_grad()
     
-    # Real images
     d_real = D(real_images)
     
-    # Generated images
     z = torch.randn(batch_size, z_dim, device=device)
     fake_images = G(z).detach()
     d_fake = D(fake_images)
     
-    # Wasserstein Loss
+    # Wasserstein loss: E[D(fake)] - E[D(real)]
     d_loss_wasserstein = d_fake.mean() - d_real.mean()
     
-    # Gradient Penalty
+    # 1-Lipschitz constraint via gradient penalty (Gulrajani et al. 2017)
     gradient_penalty = compute_gp_func(D, real_images, fake_images, device)
     
     d_loss = d_loss_wasserstein + lambda_gp * gradient_penalty
     d_loss.backward()
     d_optimizer.step()
     
-    # Train Generator (every n_critic steps)
+    # G step (every n_critic batches)
     g_loss_value = None
     
     if critic_step % n_critic == 0:
@@ -193,7 +156,7 @@ def train_wgan_gp_step(G, D, real_images, g_optimizer, d_optimizer, z_dim, devic
         fake_images = G(z)
         g_output = D(fake_images)
         
-        g_loss = -g_output.mean()  # Maximize D(fake)
+        g_loss = -g_output.mean()  # maximise critic score on fakes
         g_loss.backward()
         g_optimizer.step()
         
@@ -206,40 +169,34 @@ def train_wgan_gp_step(G, D, real_images, g_optimizer, d_optimizer, z_dim, devic
 
 
 def train(args):
-    """
-    Main training function.
-    """
-    # Set device (auto-select CUDA > MPS > CPU)
+    """Main training loop for all supported models and conditions."""
+    # CUDA > MPS > CPU
     if torch.accelerator.is_available():
         device = torch.accelerator.current_accelerator()
     else:
         device = torch.device('cpu')
     print(f"Using device: {device}")
     
-    # Set random seed
     set_seed(args.seed)
     
-    # Create experiment directory
+    # e.g. dcgan_anime_faces_full_data_seed42
     dataset_tag = os.path.basename(os.path.normpath(args.data_dir))
     exp_name = f"{args.model}_{dataset_tag}_{args.condition}_seed{args.seed}"
     exp_dir = os.path.join(args.exp_dir, exp_name)
     os.makedirs(exp_dir, exist_ok=True)
     
-    # Create subdirectories
     sample_dir = os.path.join(exp_dir, 'samples')
     checkpoint_dir = os.path.join(exp_dir, 'checkpoints')
     os.makedirs(sample_dir, exist_ok=True)
     os.makedirs(checkpoint_dir, exist_ok=True)
     
-    # Save config
+    # Dump config for reproducibility
     config = vars(args)
     with open(os.path.join(exp_dir, 'config.json'), 'w') as f:
         json.dump(config, f, indent=2)
     
-    # TensorBoard
     writer = SummaryWriter(os.path.join(exp_dir, 'logs'))
     
-    # Create data loader
     dataloader = get_dataloader(
         data_dir=args.data_dir,
         condition=args.condition,
@@ -250,10 +207,8 @@ def train(args):
         noise_std=args.noise_std
     )
     
-    # Create models
     G, D = get_models(args.model, args.z_dim, args.channels, device)
     
-    # Print model info
     g_params = sum(p.numel() for p in G.parameters())
     d_params = sum(p.numel() for p in D.parameters())
     print(f"\nModel: {args.model}")
@@ -261,24 +216,19 @@ def train(args):
     print(f"Discriminator params: {d_params:,}")
     print(f"Experiment dir: {exp_dir}\n")
     
-    # Create optimizers
     g_optimizer, d_optimizer = get_optimizers(args.model, G, D)
     
-    # Loss function (only used by DCGAN)
-    criterion = nn.BCELoss()
+    criterion = nn.BCELoss()  # only used by DCGAN / AttentionGAN
     
-    # Fixed noise for generating samples
+    # Held fixed for visual consistency across epochs
     fixed_noise = torch.randn(64, args.z_dim, device=device)
     
-    # Training records
     g_losses = []
     d_losses = []
     
-    # Select training function
     is_wgan = args.model.lower() in ['wgan_gp', 'combined']
     compute_gp_func = wgan_gp_compute_gp if args.model.lower() == 'wgan_gp' else combined_compute_gp
     
-    # Resume from checkpoint
     start_epoch = 1
     global_step = 0
     if args.resume:
@@ -296,14 +246,13 @@ def train(args):
     print(f"Starting training: {args.epochs} epochs, {len(dataloader)} batches/epoch")
     start_time = time.time()
     
-    # Critic step counter for WGAN-GP (tracks total D updates across epochs)
+    # Tracks total D updates; controls when G is updated
     if not args.resume:
         critic_step = 0
     
     for epoch in range(start_epoch, args.epochs + 1):
         epoch_start_time = time.time()
         
-        # Progress bar
         pbar = tqdm(dataloader, desc=f'Epoch {epoch}/{args.epochs}')
         
         epoch_g_losses = []
@@ -313,7 +262,6 @@ def train(args):
             real_images = real_images.to(device)
             
             if is_wgan:
-                # WGAN-GP training
                 critic_step += 1
                 g_loss, d_loss, d_real_mean, d_fake_mean = train_wgan_gp_step(
                     G, D, real_images, g_optimizer, d_optimizer,
@@ -325,7 +273,6 @@ def train(args):
                     g_losses.append(g_loss)
                     epoch_g_losses.append(g_loss)
             else:
-                # DCGAN training
                 g_loss, d_loss, d_real_mean, d_fake_mean = train_dcgan_step(
                     G, D, real_images, g_optimizer, d_optimizer,
                     args.z_dim, device, criterion
@@ -336,7 +283,6 @@ def train(args):
             d_losses.append(d_loss)
             epoch_d_losses.append(d_loss)
             
-            # Update progress bar
             mem = get_mem_mb()
             postfix = {}
             if g_loss is not None:
@@ -348,7 +294,6 @@ def train(args):
                 postfix['Mem(MB)'] = f'{mem:.0f}'
             pbar.set_postfix(postfix)
             
-            # TensorBoard logging
             if g_loss is not None:
                 writer.add_scalar('Loss/Generator', g_loss, global_step)
             writer.add_scalar('Loss/Discriminator', d_loss, global_step)
@@ -357,10 +302,8 @@ def train(args):
             
             global_step += 1
         
-        # Epoch finished
         epoch_time = time.time() - epoch_start_time
-        
-        # Compute epoch average loss
+
         if epoch_g_losses:
             avg_g_loss = sum(epoch_g_losses) / len(epoch_g_losses)
         else:
@@ -369,11 +312,9 @@ def train(args):
         
         print(f"Epoch {epoch} done - G_loss: {avg_g_loss:.4f}, D_loss: {avg_d_loss:.4f}, time: {epoch_time:.1f}s")
         
-        # Save samples
         if epoch % args.save_freq == 0 or epoch == args.epochs:
             save_samples(G, fixed_noise, epoch, sample_dir)
-            
-            # Save checkpoint
+
             torch.save({
                 'epoch': epoch,
                 'G_state_dict': G.state_dict(),
@@ -385,19 +326,16 @@ def train(args):
                 'critic_step': critic_step,
             }, os.path.join(checkpoint_dir, f'checkpoint_epoch_{epoch}.pt'))
     
-    # Training complete
     total_time = time.time() - start_time
     print(f"\nTraining complete! Total time: {total_time/3600:.2f} hours")
-    
-    # Save final models
+
+    # Save final weights
     torch.save(G.state_dict(), os.path.join(exp_dir, 'generator_final.pt'))
     torch.save(D.state_dict(), os.path.join(exp_dir, 'discriminator_final.pt'))
-    
-    # Save loss curves
+
     plot_loss_curves(g_losses, d_losses, os.path.join(exp_dir, 'loss_curve.png'),
                      title=f'{args.model} - {args.condition}')
-    
-    # Save loss statistics
+
     loss_stats = {
         'generator': compute_loss_stats(g_losses),
         'discriminator': compute_loss_stats(d_losses),
@@ -410,7 +348,6 @@ def train(args):
     with open(os.path.join(exp_dir, 'loss_stats.json'), 'w') as f:
         json.dump(loss_stats, f, indent=2)
     
-    # Close TensorBoard
     writer.close()
     
     return exp_dir
@@ -419,7 +356,7 @@ def train(args):
 def main():
     parser = argparse.ArgumentParser(description='GAN Training Script')
     
-    # Model parameters
+    # model
     parser.add_argument('--model', type=str, default='dcgan',
                         choices=['dcgan', 'wgan_gp', 'attention_gan', 'combined'],
                         help='Model type')
@@ -430,14 +367,14 @@ def main():
     parser.add_argument('--img_size', type=int, default=64,
                         help='Image size')
     
-    # Experimental conditions
+    # condition
     parser.add_argument('--condition', type=str, default='full_data',
                         choices=['full_data', 'low_data', 'noisy'],
                         help='Experimental condition')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed')
     
-    # Training parameters
+    # training
     parser.add_argument('--epochs', type=int, default=100,
                         help='Number of training epochs')
     parser.add_argument('--batch_size', type=int, default=64,
@@ -445,17 +382,17 @@ def main():
     parser.add_argument('--num_workers', type=int, default=4,
                         help='Number of data loading workers')
     
-    # WGAN-GP parameters
+    # wgan-gp
     parser.add_argument('--lambda_gp', type=float, default=10.0,
                         help='Gradient penalty coefficient')
     parser.add_argument('--n_critic', type=int, default=5,
                         help='D:G update ratio')
     
-    # Noisy condition parameters
+    # noisy condition
     parser.add_argument('--noise_std', type=float, default=0.1,
                         help='Noise standard deviation')
     
-    # Path parameters
+    # paths
     parser.add_argument('--data_dir', type=str, default='data/anime_faces',
                         help='Dataset directory')
     parser.add_argument('--exp_dir', type=str, default='experiments',
@@ -467,7 +404,6 @@ def main():
     
     args = parser.parse_args()
     
-    # Start training
     train(args)
 
 

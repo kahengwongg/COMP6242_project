@@ -1,3 +1,13 @@
+"""
+FID Evaluation Module
+Primary path: pytorch-fid library (reliable, standard)
+Fallback path: custom Inception feature extraction + scipy FID calculation
+
+Usage:
+    python evaluate.py --exp_dir experiments/dcgan_full_data_seed42 --data_dir data/anime_faces
+    python evaluate.py --exp_dir experiments/wgan_gp_low_data_seed42 --num_samples 5000
+"""
+
 import os
 import shutil
 import argparse
@@ -489,3 +499,30 @@ def evaluate(args):
     print(f"Results saved to: {results_path}")
     
     return fid_value
+
+
+def main():
+    parser = argparse.ArgumentParser(description='FID Evaluation Script')
+    
+    parser.add_argument('--exp_dir', type=str, required=True,
+                        help='Experiment directory')
+    parser.add_argument('--data_dir', type=str, default='data/anime_faces',
+                        help='Real dataset directory')
+    parser.add_argument('--num_samples', type=int, default=5000,
+                        help='Number of samples for FID computation')
+    parser.add_argument('--batch_size', type=int, default=64,
+                        help='Batch size')
+    parser.add_argument('--num_workers', type=int, default=4,
+                        help='Number of data loading workers')
+    parser.add_argument('--device', type=str, default='auto',
+                        help='Device (auto/cuda/mps/cpu)')
+    parser.add_argument('--save_samples', action='store_true',
+                        help='Whether to save generated samples (already saved by default for FID)')
+    
+    args = parser.parse_args()
+    
+    evaluate(args)
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,31 @@
+# Model checkpoints
+*.pt
+*.pth
+experiments/*/checkpoints/
+
+# Data
+data/anime_faces/
+data/celeba/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment
+.env
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

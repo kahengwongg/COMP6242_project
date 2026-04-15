@@ -6,6 +6,7 @@ experiments/*/checkpoints/
 # Data
 data/anime_faces/
 data/celeba/
+data/Anime-Face-Dataset-master/
 
 # Python cache
 __pycache__/

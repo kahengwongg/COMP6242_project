@@ -3,10 +3,12 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+.Python
 
 # Dataset & experiments (large binary/generated content)
 data/anime_faces/
 data/celeba/
+data/Anime-Face-Dataset-master/
 data/eval_real_*/
 experiments/
 
@@ -16,6 +18,16 @@ experiments/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Environment
+.env
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
 
 # OS
 .DS_Store

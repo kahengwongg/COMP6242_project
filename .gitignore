@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Dataset & experiments (large binary/generated content)
+data/anime_faces/
+data/celeba/
+data/eval_real_*/
+experiments/
+
+# Checkpoints & generated files
+*.pt
+*.pth
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db

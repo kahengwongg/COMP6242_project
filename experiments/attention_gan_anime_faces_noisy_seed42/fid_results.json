@@ -1,0 +1,7 @@
+{
+  "fid_score": 123.66862958507073,
+  "fid_method": "custom-fallback",
+  "num_samples": 5000,
+  "model": "attention_gan",
+  "condition": "noisy"
+}

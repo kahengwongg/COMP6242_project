@@ -128,16 +128,49 @@ python train.py --model combined --condition low_data --seed 42
 python train.py --model combined --condition noisy --seed 42
 ```
 
-### FID Evaluation
+### Evaluation (FID + KID + IS + Diversity + MiFID Proxy)
 
 ```bash
+# Default evaluation (uses all enabled metrics)
 python evaluate.py --exp_dir experiments/dcgan_full_data_seed42 --num_samples 5000
 
 # For CelebA experiments
-python evaluate.py --exp_dir experiments/dcgan_full_data_seed42 --data_dir data/celeba --num_samples 5000
+python evaluate.py --exp_dir experiments/dcgan_celeba_full_data_seed42 --data_dir data/celeba --num_samples 5000
+
+# Fast re-evaluation when fid_samples already exist
+python evaluate.py \
+  --exp_dir experiments/dcgan_celeba_full_data_seed42 \
+  --data_dir data/celeba \
+  --num_samples 5000 \
+  --reuse_fake_samples
+
+# Control new metrics sampling cost
+python evaluate.py \
+  --exp_dir experiments/dcgan_celeba_full_data_seed42 \
+  --data_dir data/celeba \
+  --num_samples 5000 \
+  --reuse_fake_samples \
+  --diversity_pairs 128 \
+  --mifid_fake_probe_samples 32 \
+  --mifid_real_ref_samples 256
+
+# Skip optional metric groups (if needed)
+python evaluate.py --exp_dir experiments/dcgan_celeba_full_data_seed42 --skip_diversity_metrics
+python evaluate.py --exp_dir experiments/dcgan_celeba_full_data_seed42 --skip_mifid
+python evaluate.py --exp_dir experiments/dcgan_celeba_full_data_seed42 --skip_extra_metrics
 ```
 
 Evaluation results will be saved at `experiments/<exp_name>/fid_results.json`.
+
+Main output fields in `fid_results.json` now include:
+
+- `fid_score`
+- `kid_mean`, `kid_std`
+- `inception_score_mean`, `inception_score_std`
+- `precision`, `recall`
+- `ms_ssim_mean`, `ms_ssim_diversity`
+- `lpips_diversity_mean`, `lpips_diversity_std`
+- `nn_lpips_mean`, `nn_lpips_p05`, `mifid_proxy`, `memorization_risk`
 
 ## Viewing Results
 
@@ -228,9 +261,31 @@ experiments/<model>_<condition>_seed<seed>/
 
 ## Evaluation Metrics
 
-- **Primary metric**: FID (Fréchet Inception Distance)
-- **Secondary metric**: Loss curve standard deviation (training stability)
-- **Visualization**: generated samples at fixed epochs (25, 50, 75, 100)
+- **Quality / distribution alignment**
+  - **FID** (lower is better)
+  - **KID** (lower is better)
+  - **IS** (higher is better; less informative for modern GAN comparison than FID/KID)
+- **Precision / Recall (distribution support split)**
+  - **Precision**: fidelity to real manifold (higher is better)
+  - **Recall**: coverage/diversity over real manifold (higher is better)
+- **Diversity metrics**
+  - **MS-SSIM mean**: lower indicates more diversity
+  - **MS-SSIM diversity = 1 - MS-SSIM**: higher indicates more diversity
+  - **LPIPS diversity mean/std**: higher usually indicates richer perceptual variation
+- **Anti-memorization metrics**
+  - **NN LPIPS mean/p05**: nearest-neighbor perceptual distance from generated to real images
+  - **MiFID proxy**: FID with a nearest-neighbor penalty to flag potential memorization risk (lower is better)
+  - **memorization_risk**: normalized risk indicator derived from NN LPIPS (higher means riskier)
+- **Training stability**
+  - Loss curve statistics (`g_std`, `d_std`)
+- **Visualization**
+  - Generated sample grids and per-experiment sample images
+
+Notes on interpretation:
+
+- No single metric should be used as the sole conclusion for GAN performance.
+- Prefer a joint reading of **FID/KID + Precision/Recall + Diversity (MS-SSIM, LPIPS)**.
+- `mifid_proxy` in this repo is a practical anti-memorization proxy built from NN-LPIPS; use it as a risk signal rather than an absolute theorem-level proof.
 
 ## References
 
@@ -238,3 +293,7 @@ experiments/<model>_<condition>_seed<seed>/
 - Arjovsky et al., "Wasserstein GAN", ICML 2017
 - Gulrajani et al., "Improved Training of Wasserstein GANs", NeurIPS 2017
 - Zhang et al., "Self-Attention Generative Adversarial Networks", ICML 2019
+- Z. Wang, E. P. Simoncelli, and A. C. Bovik, "Multi-scale structural similarity for image quality assessment," in Proc. 37th Asilomar Conf. Signals, Systems and Computers, 2003, pp. 1398-1402.
+- R. Zhang, P. Isola, A. A. Efros, E. Shechtman, and O. Wang, "The Unreasonable Effectiveness of Deep Features as a Perceptual Metric," in Proc. IEEE/CVF Conf. on Computer Vision and Pattern Recognition (CVPR), 2018, pp. 586-595.
+- R. Webster, J. Rabin, L. Simon, and F. Jurie, "Detecting Overfitting of Deep Generative Networks via Latent Recovery," in Proc. IEEE/CVF Conf. on Computer Vision and Pattern Recognition (CVPR), 2019, pp. 11273-11282.
+- G. J. J. van den Burg and C. K. I. Williams, "On Memorization in Probabilistic Deep Generative Models," in Advances in Neural Information Processing Systems (NeurIPS), 2021.

@@ -12,6 +12,7 @@ import os
 import shutil
 import argparse
 import json
+import glob
 import numpy as np
 import torch
 import torch.nn as nn
@@ -19,6 +20,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from torchvision.utils import save_image
+from PIL import Image
 from tqdm import tqdm
 
 from models.dcgan import DCGANGenerator
@@ -135,6 +137,210 @@ def calculate_fid_pytorch_fid(real_dir, fake_dir, device, batch_size=64):
         dims=2048,
     )
     return float(fid_value)
+
+
+def calculate_extra_metrics_torch_fidelity(real_dir, fake_dir, device):
+    """
+    Compute additional metrics using torch-fidelity.
+
+    Returns a dict with KID, IS, Precision, Recall when available.
+    """
+    try:
+        from torch_fidelity import calculate_metrics
+    except ImportError:
+        print("torch-fidelity not installed, skipping extra metrics (KID/IS/PRC).")
+        return {}
+
+    use_cuda = device.type == 'cuda'
+    try:
+        metrics = calculate_metrics(
+            input1=real_dir,
+            input2=fake_dir,
+            cuda=use_cuda,
+            fid=False,
+            kid=True,
+            isc=True,
+            prc=True,
+            verbose=False,
+            samples_find_deep=True,
+        )
+    except Exception as e:
+        print(f"[Warning] Extra metric computation failed: {e}")
+        return {}
+
+    return {
+        'kid_mean': metrics.get('kernel_inception_distance_mean'),
+        'kid_std': metrics.get('kernel_inception_distance_std'),
+        'inception_score_mean': metrics.get('inception_score_mean'),
+        'inception_score_std': metrics.get('inception_score_std'),
+        'precision': metrics.get('precision'),
+        'recall': metrics.get('recall'),
+    }
+
+
+def list_image_paths(image_dir):
+    """List image files in a directory recursively."""
+    paths = []
+    for ext in ('*.png', '*.jpg', '*.jpeg', '*.PNG', '*.JPG', '*.JPEG'):
+        paths.extend(glob.glob(os.path.join(image_dir, '**', ext), recursive=True))
+    return sorted(paths)
+
+
+def load_image_tensor(path, device, img_size=64):
+    """Load an image file to tensor in [-1, 1], shape [1, 3, H, W]."""
+    tfm = transforms.Compose([
+        transforms.Resize((img_size, img_size)),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    ])
+    with Image.open(path).convert('RGB') as im:
+        t = tfm(im).unsqueeze(0).to(device)
+    return t
+
+
+def calculate_diversity_metrics(fake_dir, device, num_pairs=512, pair_batch_size=16, seed=0):
+    """
+    Compute diversity statistics:
+      - MS-SSIM mean (lower means more diversity)
+      - LPIPS mean/std across random fake-fake pairs (higher means more diversity)
+    """
+    try:
+        import lpips
+        from pytorch_msssim import ms_ssim
+    except ImportError:
+        print("lpips or pytorch-msssim missing; skipping diversity metrics.")
+        return {}
+
+    fake_paths = list_image_paths(fake_dir)
+    if len(fake_paths) < 2:
+        return {}
+
+    rng = np.random.RandomState(seed)
+    n_pairs = min(num_pairs, len(fake_paths) * 2)
+    i_idx = rng.randint(0, len(fake_paths), size=n_pairs)
+    j_idx = rng.randint(0, len(fake_paths), size=n_pairs)
+
+    # Avoid identical pairs when possible
+    same = (i_idx == j_idx)
+    j_idx[same] = (j_idx[same] + 1) % len(fake_paths)
+
+    lpips_model = lpips.LPIPS(net='alex').to(device)
+    lpips_model.eval()
+
+    msssim_vals = []
+    lpips_vals = []
+
+    with torch.no_grad():
+        for start in range(0, n_pairs, pair_batch_size):
+            end = min(start + pair_batch_size, n_pairs)
+            batch_i = i_idx[start:end]
+            batch_j = j_idx[start:end]
+
+            a_list = [load_image_tensor(fake_paths[k], device) for k in batch_i]
+            b_list = [load_image_tensor(fake_paths[k], device) for k in batch_j]
+            a = torch.cat(a_list, dim=0)
+            b = torch.cat(b_list, dim=0)
+
+            # ms-ssim on 64x64 triggers internal size assertions; upsample only for this metric.
+            a_01 = (a + 1.0) / 2.0
+            b_01 = (b + 1.0) / 2.0
+            a_01_ms = F.interpolate(a_01, size=(256, 256), mode='bilinear', align_corners=False)
+            b_01_ms = F.interpolate(b_01, size=(256, 256), mode='bilinear', align_corners=False)
+            ms_vals = ms_ssim(a_01_ms, b_01_ms, data_range=1.0, size_average=False)
+            lp_vals = lpips_model(a, b).view(-1)
+
+            msssim_vals.extend(ms_vals.detach().cpu().numpy().tolist())
+            lpips_vals.extend(lp_vals.detach().cpu().numpy().tolist())
+
+    ms_mean = float(np.mean(msssim_vals)) if msssim_vals else None
+    lp_mean = float(np.mean(lpips_vals)) if lpips_vals else None
+    lp_std = float(np.std(lpips_vals)) if lpips_vals else None
+
+    return {
+        'ms_ssim_mean': ms_mean,
+        'ms_ssim_diversity': (1.0 - ms_mean) if ms_mean is not None else None,
+        'lpips_diversity_mean': lp_mean,
+        'lpips_diversity_std': lp_std,
+        'diversity_pairs': int(n_pairs),
+    }
+
+
+def calculate_mifid_proxy(
+    real_dir,
+    fake_dir,
+    fid_value,
+    device,
+    fake_probe_samples=64,
+    real_ref_samples=512,
+    real_batch_size=32,
+    tau=0.2,
+    seed=0,
+):
+    """
+    Compute a MiFID-style anti-memorization proxy.
+
+    We estimate nearest-neighbor LPIPS distance from generated images to real images,
+    then apply a penalty to FID if generated images are too close to reals.
+    """
+    try:
+        import lpips
+    except ImportError:
+        print("lpips missing; skipping MiFID proxy.")
+        return {}
+
+    real_paths = list_image_paths(real_dir)
+    fake_paths = list_image_paths(fake_dir)
+    if not real_paths or not fake_paths:
+        return {}
+
+    rng = np.random.RandomState(seed)
+    fake_n = min(fake_probe_samples, len(fake_paths))
+    real_n = min(real_ref_samples, len(real_paths))
+
+    fake_sel = [fake_paths[i] for i in rng.choice(len(fake_paths), fake_n, replace=False)]
+    real_sel = [real_paths[i] for i in rng.choice(len(real_paths), real_n, replace=False)]
+
+    lpips_model = lpips.LPIPS(net='alex').to(device)
+    lpips_model.eval()
+
+    nn_dists = []
+    with torch.no_grad():
+        # Preload real images in batches to reduce disk overhead
+        real_batches = []
+        for start in range(0, len(real_sel), real_batch_size):
+            chunk = real_sel[start:start + real_batch_size]
+            r = torch.cat([load_image_tensor(p, device) for p in chunk], dim=0)
+            real_batches.append(r)
+
+        for fp in tqdm(fake_sel, desc='MiFID proxy (NN LPIPS)'):
+            f = load_image_tensor(fp, device)
+            best = None
+            for rb in real_batches:
+                f_rep = f.repeat(rb.size(0), 1, 1, 1)
+                d = lpips_model(f_rep, rb).view(-1)
+                cur = float(d.min().item())
+                if best is None or cur < best:
+                    best = cur
+            nn_dists.append(best)
+
+    if not nn_dists:
+        return {}
+
+    nn_mean = float(np.mean(nn_dists))
+    nn_p05 = float(np.percentile(nn_dists, 5))
+    penalty = max(0.0, tau - nn_mean) / max(tau, 1e-8)
+    mifid_proxy = float(fid_value) * (1.0 + penalty)
+    memorization_risk = 1.0 - min(1.0, nn_mean / max(tau, 1e-8))
+
+    return {
+        'nn_lpips_mean': nn_mean,
+        'nn_lpips_p05': nn_p05,
+        'mifid_proxy': mifid_proxy,
+        'memorization_risk': memorization_risk,
+        'mifid_tau': float(tau),
+        'mifid_fake_probe_samples': int(fake_n),
+        'mifid_real_ref_samples': int(real_n),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -429,15 +635,24 @@ def evaluate(args):
     torch.manual_seed(0)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(0)
-    print(f"\nGenerating {args.num_samples} samples...")
     fake_samples_dir = os.path.join(args.exp_dir, 'fid_samples')
-    # Clear previous samples to ensure exact count
-    if os.path.exists(fake_samples_dir):
-        shutil.rmtree(fake_samples_dir)
-    os.makedirs(fake_samples_dir, exist_ok=True)
-    
-    generate_samples(G, args.num_samples, z_dim, args.batch_size,
-                     device, save_dir=fake_samples_dir)
+    reuse_ok = False
+    if args.reuse_fake_samples and os.path.isdir(fake_samples_dir):
+        existing = [f for f in os.listdir(fake_samples_dir) if f.lower().endswith('.png')]
+        if len(existing) >= args.num_samples:
+            reuse_ok = True
+
+    if reuse_ok:
+        print(f"\nReusing existing generated samples: {fake_samples_dir}")
+    else:
+        print(f"\nGenerating {args.num_samples} samples...")
+        # Clear previous samples to ensure exact count
+        if os.path.exists(fake_samples_dir):
+            shutil.rmtree(fake_samples_dir)
+        os.makedirs(fake_samples_dir, exist_ok=True)
+
+        generate_samples(G, args.num_samples, z_dim, args.batch_size,
+                         device, save_dir=fake_samples_dir)
     
     # ---- Compute FID ----
     fid_value = None
@@ -482,6 +697,61 @@ def evaluate(args):
     print(f"\n{'='*50}")
     print(f"FID Score: {fid_value:.2f}  (method: {fid_method})")
     print(f"{'='*50}")
+
+    extra_metrics = {}
+    if not args.skip_extra_metrics:
+        print("\nComputing extra metrics (KID / IS / Precision / Recall)...")
+        extra_metrics = calculate_extra_metrics_torch_fidelity(real_eval_dir, fake_samples_dir, device)
+        if extra_metrics:
+            print("Extra metrics:")
+            if extra_metrics.get('kid_mean') is not None:
+                print(f"  KID: {extra_metrics['kid_mean']:.6f} ± {extra_metrics.get('kid_std', 0.0):.6f}")
+            if extra_metrics.get('inception_score_mean') is not None:
+                print(f"  IS: {extra_metrics['inception_score_mean']:.4f} ± {extra_metrics.get('inception_score_std', 0.0):.4f}")
+            if extra_metrics.get('precision') is not None:
+                print(f"  Precision: {extra_metrics['precision']:.4f}")
+            if extra_metrics.get('recall') is not None:
+                print(f"  Recall: {extra_metrics['recall']:.4f}")
+
+    diversity_metrics = {}
+    if not args.skip_diversity_metrics:
+        print("\nComputing diversity metrics (MS-SSIM / LPIPS)...")
+        diversity_metrics = calculate_diversity_metrics(
+            fake_samples_dir,
+            device,
+            num_pairs=args.diversity_pairs,
+            pair_batch_size=args.diversity_pair_batch_size,
+            seed=0,
+        )
+        if diversity_metrics:
+            print("Diversity metrics:")
+            if diversity_metrics.get('ms_ssim_mean') is not None:
+                print(f"  MS-SSIM mean: {diversity_metrics['ms_ssim_mean']:.6f} (lower is better)")
+            if diversity_metrics.get('ms_ssim_diversity') is not None:
+                print(f"  MS-SSIM diversity (1-MS-SSIM): {diversity_metrics['ms_ssim_diversity']:.6f}")
+            if diversity_metrics.get('lpips_diversity_mean') is not None:
+                print(f"  LPIPS diversity mean: {diversity_metrics['lpips_diversity_mean']:.6f}")
+
+    mifid_metrics = {}
+    if not args.skip_mifid:
+        print("\nComputing MiFID proxy (anti-memorization)...")
+        mifid_metrics = calculate_mifid_proxy(
+            real_eval_dir,
+            fake_samples_dir,
+            fid_value,
+            device,
+            fake_probe_samples=args.mifid_fake_probe_samples,
+            real_ref_samples=args.mifid_real_ref_samples,
+            real_batch_size=args.mifid_real_batch_size,
+            tau=args.mifid_tau,
+            seed=0,
+        )
+        if mifid_metrics:
+            print("MiFID proxy metrics:")
+            print(f"  NN LPIPS mean: {mifid_metrics['nn_lpips_mean']:.6f}")
+            print(f"  NN LPIPS p05: {mifid_metrics['nn_lpips_p05']:.6f}")
+            print(f"  MiFID proxy: {mifid_metrics['mifid_proxy']:.4f} (lower is better)")
+            print(f"  Memorization risk: {mifid_metrics['memorization_risk']:.4f} (higher means riskier)")
     
     # Save results
     results = {
@@ -491,6 +761,9 @@ def evaluate(args):
         'model': model_name,
         'condition': condition,
     }
+    results.update(extra_metrics)
+    results.update(diversity_metrics)
+    results.update(mifid_metrics)
     
     results_path = os.path.join(args.exp_dir, 'fid_results.json')
     with open(results_path, 'w') as f:
@@ -518,6 +791,26 @@ def main():
                         help='Device (auto/cuda/mps/cpu)')
     parser.add_argument('--save_samples', action='store_true',
                         help='Whether to save generated samples (already saved by default for FID)')
+    parser.add_argument('--skip_extra_metrics', action='store_true',
+                        help='Skip extra metrics (KID, IS, Precision, Recall)')
+    parser.add_argument('--reuse_fake_samples', action='store_true',
+                        help='Reuse existing fid_samples if enough images are present')
+    parser.add_argument('--skip_diversity_metrics', action='store_true',
+                        help='Skip diversity metrics (MS-SSIM, LPIPS)')
+    parser.add_argument('--diversity_pairs', type=int, default=512,
+                        help='Number of random fake-fake pairs for diversity metrics')
+    parser.add_argument('--diversity_pair_batch_size', type=int, default=16,
+                        help='Pair batch size for diversity metric computation')
+    parser.add_argument('--skip_mifid', action='store_true',
+                        help='Skip MiFID proxy anti-memorization metric')
+    parser.add_argument('--mifid_fake_probe_samples', type=int, default=64,
+                        help='Number of fake samples probed for MiFID proxy')
+    parser.add_argument('--mifid_real_ref_samples', type=int, default=512,
+                        help='Number of real reference samples for MiFID proxy')
+    parser.add_argument('--mifid_real_batch_size', type=int, default=32,
+                        help='Real-image batch size used in MiFID proxy nearest-neighbor search')
+    parser.add_argument('--mifid_tau', type=float, default=0.2,
+                        help='Distance threshold controlling MiFID proxy penalty strength')
     
     args = parser.parse_args()
     

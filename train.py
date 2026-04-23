@@ -30,6 +30,29 @@ from utils.data_loader import get_dataloader, set_seed
 from utils.visualize import save_samples, plot_loss_curves, compute_loss_stats
 
 
+def safe_torch_save(obj, path):
+    """Best-effort torch.save with atomic replace and legacy fallback."""
+    tmp_path = f"{path}.tmp"
+    last_error = None
+
+    # Try modern zip format first, then legacy format as a fallback.
+    for use_new_zip in (True, False):
+        try:
+            torch.save(obj, tmp_path, _use_new_zipfile_serialization=use_new_zip)
+            os.replace(tmp_path, path)
+            return True
+        except Exception as e:
+            last_error = e
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
+    print(f"[Warning] Failed to save {path}: {last_error}")
+    return False
+
+
 def get_mem_mb():
     """Return current accelerator memory usage in MB, or None if unavailable."""
     if torch.cuda.is_available():
@@ -315,7 +338,7 @@ def train(args):
         if epoch % args.save_freq == 0 or epoch == args.epochs:
             save_samples(G, fixed_noise, epoch, sample_dir)
 
-            torch.save({
+            checkpoint_ok = safe_torch_save({
                 'epoch': epoch,
                 'G_state_dict': G.state_dict(),
                 'D_state_dict': D.state_dict(),
@@ -325,13 +348,17 @@ def train(args):
                 'd_loss': avg_d_loss,
                 'critic_step': critic_step,
             }, os.path.join(checkpoint_dir, f'checkpoint_epoch_{epoch}.pt'))
+            if not checkpoint_ok:
+                print(f"[Warning] Checkpoint save failed at epoch {epoch}; continuing training.")
     
     total_time = time.time() - start_time
     print(f"\nTraining complete! Total time: {total_time/3600:.2f} hours")
 
     # Save final weights
-    torch.save(G.state_dict(), os.path.join(exp_dir, 'generator_final.pt'))
-    torch.save(D.state_dict(), os.path.join(exp_dir, 'discriminator_final.pt'))
+    if not safe_torch_save(G.state_dict(), os.path.join(exp_dir, 'generator_final.pt')):
+        print("[Warning] Failed to save generator_final.pt; last checkpoint can be used instead.")
+    if not safe_torch_save(D.state_dict(), os.path.join(exp_dir, 'discriminator_final.pt')):
+        print("[Warning] Failed to save discriminator_final.pt; last checkpoint can be used instead.")
 
     plot_loss_curves(g_losses, d_losses, os.path.join(exp_dir, 'loss_curve.png'),
                      title=f'{args.model} - {args.condition}')

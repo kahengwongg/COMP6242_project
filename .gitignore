@@ -32,3 +32,9 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+project_plan_eng.md
+*.pdf
+COMP6242_project_experiments/
+.venv/
+data/
+

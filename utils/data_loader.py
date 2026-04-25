@@ -88,13 +88,27 @@ def get_transforms(img_size: int = 64,
     Returns:
         transforms.Compose
     """
+    # Order matters:
+    #   Resize -> CenterCrop operate on PIL images.
+    #   RandomHorizontalFlip also operates on PIL images (must come before ToTensor).
+    #   ToTensor -> Normalize convert to tensor in [-1, 1].
+    #   AddGaussianNoise operates on the normalized tensor.
     base = [
         transforms.Resize(img_size),
         transforms.CenterCrop(img_size),
+    ]
+
+    # The project plan specifies random horizontal flip for full_data as a
+    # light augmentation to improve generalisation. Low-data and noisy keep
+    # deterministic preprocessing so each ablation stays isolated.
+    if condition == 'full_data':
+        base.append(transforms.RandomHorizontalFlip(p=0.5))
+
+    base.extend([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5],
                              std=[0.5, 0.5, 0.5]),   # maps [0,1] -> [-1,1]
-    ]
+    ])
 
     if condition == 'noisy':
         base.append(AddGaussianNoise(std=noise_std))

@@ -7,6 +7,8 @@ This project contains the complete implementation of 12 GAN experiments, designe
 ```
 project/
 ├── data/                         # Data directory
+│   ├── celeba/                  # Source images (e.g. 178x218 CelebA originals)
+│   └── eval_real_<ds>_<sz>px_<n>/  # Cached real-image subset for FID, preprocessed to img_size
 ├── models/
 │   ├── __init__.py
 │   ├── layers.py             # Self-Attention and other shared components
@@ -132,23 +134,23 @@ python train.py --model combined --condition noisy --seed 42
 
 ```bash
 # Default evaluation (uses all enabled metrics)
-python evaluate.py --exp_dir experiments/dcgan_full_data_seed42 --num_samples 5000
+python evaluate.py --exp_dir experiments/dcgan_full_data_seed42 --num_samples 10000
 
 # For CelebA experiments
-python evaluate.py --exp_dir experiments/dcgan_celeba_full_data_seed42 --data_dir data/celeba --num_samples 5000
+python evaluate.py --exp_dir experiments/dcgan_celeba_full_data_seed42 --data_dir data/celeba --num_samples 10000
 
 # Fast re-evaluation when fid_samples already exist
 python evaluate.py \
   --exp_dir experiments/dcgan_celeba_full_data_seed42 \
   --data_dir data/celeba \
-  --num_samples 5000 \
+  --num_samples 10000 \
   --reuse_fake_samples
 
 # Control new metrics sampling cost
 python evaluate.py \
   --exp_dir experiments/dcgan_celeba_full_data_seed42 \
   --data_dir data/celeba \
-  --num_samples 5000 \
+  --num_samples 10000 \
   --reuse_fake_samples \
   --diversity_pairs 128 \
   --mifid_fake_probe_samples 32 \
@@ -162,15 +164,40 @@ python evaluate.py --exp_dir experiments/dcgan_celeba_full_data_seed42 --skip_ex
 
 Evaluation results will be saved at `experiments/<exp_name>/fid_results.json`.
 
-Main output fields in `fid_results.json` now include:
+Output fields in `fid_results.json`, grouped by category:
 
-- `fid_score`
-- `kid_mean`, `kid_std`
-- `inception_score_mean`, `inception_score_std`
-- `precision`, `recall`
-- `ms_ssim_mean`, `ms_ssim_diversity`
-- `lpips_diversity_mean`, `lpips_diversity_std`
-- `nn_lpips_mean`, `nn_lpips_p05`, `mifid_proxy`, `memorization_risk`
+- **Identity / config**: `model`, `condition`, `num_samples`, `fid_method` (`pytorch-fid` or `custom-fallback`)
+- **Quality / distribution alignment**: `fid_score`, `kid_mean`, `kid_std`, `inception_score_mean`, `inception_score_std`
+- **Precision / Recall (manifold split)**: `precision`, `recall`
+- **Diversity**: `ms_ssim_mean`, `ms_ssim_diversity`, `lpips_diversity_mean`, `lpips_diversity_std`, `diversity_pairs`
+- **Anti-memorization (MiFID proxy)**: `nn_lpips_mean`, `nn_lpips_p05`, `mifid_proxy`, `memorization_risk`, `mifid_tau`, `mifid_fake_probe_samples`, `mifid_real_ref_samples`
+
+### Run all 12 evaluations
+
+```bash
+for m in dcgan wgan_gp attention_gan combined; do
+  for c in full_data low_data noisy; do
+    python evaluate.py \
+      --exp_dir experiments/${m}_celeba_${c}_seed42 \
+      --data_dir data/celeba \
+      --num_samples 10000 \
+      --reuse_fake_samples \
+      --skip_extra_metrics
+  done
+done
+```
+
+The first run builds the resolution-matched real-image cache (~1 min); the remaining 11 reuse it. `--skip_extra_metrics` skips `torch-fidelity` (KID / IS / Precision / Recall) — recommended on Apple Silicon, where `torch-fidelity` has no MPS backend and falls back to CPU.
+
+### Evaluation methodology
+
+FID is computed via [pytorch-fid](https://github.com/mseitzer/pytorch-fid) (primary path) with a torchvision-Inception fallback for environments where `pytorch-fid` is unavailable. The primary path is the canonical FID implementation used by the GAN literature; both paths use 2048-d Inception features and the standard Fréchet distance between the two Gaussian fits.
+
+To make the real and fake feature distributions comparable, real images are preprocessed to the generator's output resolution (`img_size × img_size`, default 64) using the same deterministic pipeline applied during training: `Resize(img_size) + CenterCrop(img_size)` (no flip / no noise; see `utils/data_loader.get_transforms`). This is required for FID correctness — `pytorch-fid` loads PNGs from disk and stretches them to 299×299 inside its Inception wrapper, so feeding raw 178×218 CelebA originals while the generator outputs 64×64 produces a resolution asymmetry that contaminates the feature distributions and inflates FID by ~3–5×.
+
+Preprocessed real images are cached at `data/eval_real_{dataset}_{img_size}px_{N}/` with a `_source.txt` marker recording the source path, `img_size`, and preprocessing pipeline. The cache is automatically rebuilt when the marker doesn't match (e.g. switching datasets, switching `img_size`, or upgrading from a version of `evaluate.py` that pre-dates this preprocessing).
+
+Generated samples used for FID are saved at `experiments/<exp_name>/fid_samples/` and can be reused across re-evaluations with `--reuse_fake_samples`. Sample generation is seeded (`torch.manual_seed(0)`, plus `torch.mps.manual_seed(0)` when running on Apple Silicon) so the same checkpoint always produces the same FID samples.
 
 ## Viewing Results
 
@@ -285,6 +312,7 @@ Notes on interpretation:
 
 - No single metric should be used as the sole conclusion for GAN performance.
 - Prefer a joint reading of **FID/KID + Precision/Recall + Diversity (MS-SSIM, LPIPS)**.
+- Prefer the `pytorch-fid` FID values (`fid_method = "pytorch-fid"`); the custom torchvision-Inception fallback is provided for portability and produces values on a *different* feature-space scale that are not directly comparable to the `pytorch-fid` ones (see Evaluation methodology).
 - `mifid_proxy` in this repo is a practical anti-memorization proxy built from NN-LPIPS; use it as a risk signal rather than an absolute theorem-level proof.
 
 ## References

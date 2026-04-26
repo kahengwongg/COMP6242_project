@@ -9,18 +9,18 @@
 
 | Rank | Experiment | FID | KID | IS | Recall | LPIPS div | 1-MS-SSIM | MiFID proxy | Mem risk | G_std | D_std | Hours |
 |---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | wgan_gp_celeba_full_data_seed42 | 175.20 | 0.208769 | 2.298 | 0.3308 | 0.2842 | 0.6972 | 175.20 | 0.0000 | 4.3217 | 1.8545 | 0.91 |
-| 2 | combined_celeba_full_data_seed42 | 177.46 | 0.208616 | 2.298 | 0.2498 | 0.2897 | 0.7396 | 177.46 | 0.0000 | 6.2429 | 1.7848 | 1.23 |
-| 3 | dcgan_celeba_full_data_seed42 | 180.95 | 0.217536 | 2.298 | 0.3572 | 0.2794 | 0.6936 | 180.95 | 0.0000 | 2.0187 | 0.4723 | 0.76 |
-| 4 | dcgan_celeba_low_data_seed42 | 189.15 | 0.230173 | 2.298 | 0.3958 | 0.2676 | 0.6897 | 189.15 | 0.0000 | 1.4270 | 0.5520 | 0.08 |
-| 5 | dcgan_celeba_noisy_seed42 | 207.53 | 0.247987 | 2.298 | 0.1318 | 0.2959 | 0.7480 | 207.53 | 0.0000 | 1.5036 | 0.3601 | 0.76 |
-| 6 | attention_gan_celeba_low_data_seed42 | 210.08 | 0.259095 | 2.298 | 0.3150 | 0.2704 | 0.6738 | 210.08 | 0.0000 | 1.5837 | 0.4386 | 0.14 |
-| 7 | attention_gan_celeba_noisy_seed42 | 212.17 | 0.251974 | 2.298 | 0.1056 | 0.2936 | 0.7237 | 212.17 | 0.0000 | 1.8422 | 0.3706 | 1.36 |
-| 8 | wgan_gp_celeba_noisy_seed42 | 216.12 | 0.259927 | 2.298 | 0.1448 | 0.2974 | 0.7592 | 216.12 | 0.0000 | 1.7532 | 0.3134 | 0.56 |
-| 9 | combined_celeba_noisy_seed42 | 219.42 | 0.263394 | 2.298 | 0.1176 | 0.2752 | 0.7529 | 219.42 | 0.0000 | 3.5112 | 1.6513 | 1.23 |
-| 10 | wgan_gp_celeba_low_data_seed42 | 222.18 | 0.280367 | 2.298 | 0.1686 | 0.2700 | 0.7386 | 222.18 | 0.0000 | 8.6579 | 4.1293 | 0.09 |
-| 11 | combined_celeba_low_data_seed42 | 226.69 | 0.283707 | 2.298 | 0.1980 | 0.2788 | 0.7402 | 226.69 | 0.0000 | N/A | N/A | N/A |
-| 12 | attention_gan_celeba_full_data_seed42 | 321.71 | 0.428627 | 2.298 | 0.0002 | 0.2432 | 0.3315 | 321.71 | 0.0000 | 35.1192 | 0.6022 | 1.36 |
+| 1 | attention_gan_anime_faces_full_data_seed42 | 65.72 | 0.060512 | 2.342 | 0.6410 | 0.2881 | 0.6877 | 70.99 | 0.0801 | 1.5553 | 0.4925 | 0.38 |
+| 2 | attention_gan_anime_faces_noisy_seed42 | 122.21 | 0.122762 | 2.342 | 0.1034 | 0.2795 | 0.7138 | 137.76 | 0.1272 | 1.2055 | 0.4943 | 0.38 |
+| 3 | combined_anime_faces_full_data_seed42 | 133.76 | 0.142523 | 2.342 | 0.2870 | 0.2982 | 0.7409 | 154.76 | 0.1570 | 6.7655 | 4.9610 | 0.33 |
+| 4 | dcgan_anime_faces_full_data_seed42 | 168.75 | 0.174885 | 2.342 | 0.2358 | 0.2646 | 0.5826 | 198.52 | 0.1764 | 1.6244 | 0.4322 | 0.19 |
+| 5 | combined_anime_faces_noisy_seed42 | 183.06 | 0.196663 | 2.342 | 0.0796 | 0.3056 | 0.7759 | 200.35 | 0.0944 | 6.1455 | 4.5164 | 0.33 |
+| 6 | dcgan_anime_faces_noisy_seed42 | 229.90 | 0.253480 | 2.342 | 0.0196 | 0.2978 | 0.5860 | 236.70 | 0.0296 | 1.4226 | 0.3514 | 0.19 |
+| 7 | wgan_gp_anime_faces_full_data_seed42 | 291.43 | 0.351127 | 2.342 | 0.0196 | 0.2939 | 0.7256 | 291.43 | 0.0000 | 11.9849 | 8.0301 | 0.24 |
+| 8 | attention_gan_anime_faces_low_data_seed42 | 300.13 | 0.356249 | 2.342 | 0.0016 | 0.2569 | 0.3586 | 300.13 | 0.0000 | 2.3034 | 0.5024 | 0.04 |
+| 9 | wgan_gp_anime_faces_low_data_seed42 | 310.57 | 0.391001 | 2.342 | 0.0000 | 0.1785 | 0.4696 | 310.57 | 0.0000 | 18.1297 | 14.5093 | 0.04 |
+| 10 | wgan_gp_anime_faces_noisy_seed42 | 316.82 | 0.385714 | 2.342 | 0.0060 | 0.2952 | 0.7497 | 316.82 | 0.0000 | 11.2941 | 7.8683 | 0.25 |
+| 11 | dcgan_anime_faces_low_data_seed42 | 333.22 | 0.412521 | 2.342 | 0.0000 | 0.1781 | 0.2094 | 333.22 | 0.0000 | 3.2038 | 0.9183 | 0.03 |
+| 12 | combined_anime_faces_low_data_seed42 | 364.22 | 0.465106 | 2.342 | 0.0000 | 0.2913 | 0.6463 | 364.22 | 0.0000 | 12.5248 | 8.8160 | 0.04 |
 
 ## Plots
 
@@ -36,86 +36,86 @@
 
 ### Per-Experiment Sample
 
-- dcgan_celeba_full_data_seed42 (FID: 180.95)
-  ![](../experiments/dcgan_celeba_full_data_seed42/fid_samples/00000.png)
-- dcgan_celeba_low_data_seed42 (FID: 189.15)
-  ![](../experiments/dcgan_celeba_low_data_seed42/fid_samples/00000.png)
-- dcgan_celeba_noisy_seed42 (FID: 207.53)
-  ![](../experiments/dcgan_celeba_noisy_seed42/fid_samples/00000.png)
-- wgan_gp_celeba_full_data_seed42 (FID: 175.20)
-  ![](../experiments/wgan_gp_celeba_full_data_seed42/fid_samples/00000.png)
-- wgan_gp_celeba_low_data_seed42 (FID: 222.18)
-  ![](../experiments/wgan_gp_celeba_low_data_seed42/fid_samples/00000.png)
-- wgan_gp_celeba_noisy_seed42 (FID: 216.12)
-  ![](../experiments/wgan_gp_celeba_noisy_seed42/fid_samples/00000.png)
-- attention_gan_celeba_full_data_seed42 (FID: 321.71)
-  ![](../experiments/attention_gan_celeba_full_data_seed42/fid_samples/00000.png)
-- attention_gan_celeba_low_data_seed42 (FID: 210.08)
-  ![](../experiments/attention_gan_celeba_low_data_seed42/fid_samples/00000.png)
-- attention_gan_celeba_noisy_seed42 (FID: 212.17)
-  ![](../experiments/attention_gan_celeba_noisy_seed42/fid_samples/00000.png)
-- combined_celeba_full_data_seed42 (FID: 177.46)
-  ![](../experiments/combined_celeba_full_data_seed42/fid_samples/00000.png)
-- combined_celeba_low_data_seed42 (FID: 226.69)
-  ![](../experiments/combined_celeba_low_data_seed42/fid_samples/00000.png)
-- combined_celeba_noisy_seed42 (FID: 219.42)
-  ![](../experiments/combined_celeba_noisy_seed42/fid_samples/00000.png)
+- dcgan_anime_faces_full_data_seed42 (FID: 168.75)
+  ![](../experiments/anime_train_100ep/dcgan_anime_faces_full_data_seed42/fid_samples/00000.png)
+- dcgan_anime_faces_low_data_seed42 (FID: 333.22)
+  ![](../experiments/anime_train_100ep/dcgan_anime_faces_low_data_seed42/fid_samples/00000.png)
+- dcgan_anime_faces_noisy_seed42 (FID: 229.90)
+  ![](../experiments/anime_train_100ep/dcgan_anime_faces_noisy_seed42/fid_samples/00000.png)
+- wgan_gp_anime_faces_full_data_seed42 (FID: 291.43)
+  ![](../experiments/anime_train_100ep/wgan_gp_anime_faces_full_data_seed42/fid_samples/00000.png)
+- wgan_gp_anime_faces_low_data_seed42 (FID: 310.57)
+  ![](../experiments/anime_train_100ep/wgan_gp_anime_faces_low_data_seed42/fid_samples/00000.png)
+- wgan_gp_anime_faces_noisy_seed42 (FID: 316.82)
+  ![](../experiments/anime_train_100ep/wgan_gp_anime_faces_noisy_seed42/fid_samples/00000.png)
+- attention_gan_anime_faces_full_data_seed42 (FID: 65.72)
+  ![](../experiments/anime_train_100ep/attention_gan_anime_faces_full_data_seed42/fid_samples/00000.png)
+- attention_gan_anime_faces_low_data_seed42 (FID: 300.13)
+  ![](../experiments/anime_train_100ep/attention_gan_anime_faces_low_data_seed42/fid_samples/00000.png)
+- attention_gan_anime_faces_noisy_seed42 (FID: 122.21)
+  ![](../experiments/anime_train_100ep/attention_gan_anime_faces_noisy_seed42/fid_samples/00000.png)
+- combined_anime_faces_full_data_seed42 (FID: 133.76)
+  ![](../experiments/anime_train_100ep/combined_anime_faces_full_data_seed42/fid_samples/00000.png)
+- combined_anime_faces_low_data_seed42 (FID: 364.22)
+  ![](../experiments/anime_train_100ep/combined_anime_faces_low_data_seed42/fid_samples/00000.png)
+- combined_anime_faces_noisy_seed42 (FID: 183.06)
+  ![](../experiments/anime_train_100ep/combined_anime_faces_noisy_seed42/fid_samples/00000.png)
 
 ## Comparison
 
 ### Average FID by Model
 
-- dcgan: 192.54
-- wgan_gp: 204.50
-- attention_gan: 247.99
-- combined: 207.86
+- dcgan: 243.96
+- wgan_gp: 306.27
+- attention_gan: 162.69
+- combined: 227.02
 
 ### Average FID by Condition
 
-- full_data: 213.83
-- low_data: 212.02
-- noisy: 213.81
+- full_data: 164.92
+- low_data: 327.04
+- noisy: 213.00
 
 ## Metric-by-Metric Interpretation
 
 ### 1) Fidelity / Quality (FID, KID)
 
 - Interpretation: lower is better; indicates generated distribution is closer to real data.
-- Best FID experiment: wgan_gp_celeba_full_data_seed42 (175.20).
-- Best KID experiment: combined_celeba_full_data_seed42 (0.208616).
+- Best FID experiment: attention_gan_anime_faces_full_data_seed42 (65.72).
+- Best KID experiment: attention_gan_anime_faces_full_data_seed42 (0.060512).
 - Model-level view (mean KID):
-  - dcgan: 0.231899
-  - wgan_gp: 0.249688
-  - attention_gan: 0.313232
-  - combined: 0.251906
+  - dcgan: 0.280295
+  - wgan_gp: 0.375947
+  - attention_gan: 0.179841
+  - combined: 0.268097
 
 ### 2) Coverage / Diversity (Recall, LPIPS, 1-MS-SSIM)
 
 - Interpretation: higher Recall and higher diversity statistics usually indicate broader mode coverage.
-- Best Recall experiment: dcgan_celeba_low_data_seed42 (0.3958).
-- Best LPIPS diversity experiment: wgan_gp_celeba_noisy_seed42 (0.2974).
-- Best 1-MS-SSIM diversity experiment: wgan_gp_celeba_noisy_seed42 (0.7592).
+- Best Recall experiment: attention_gan_anime_faces_full_data_seed42 (0.6410).
+- Best LPIPS diversity experiment: combined_anime_faces_noisy_seed42 (0.3056).
+- Best 1-MS-SSIM diversity experiment: combined_anime_faces_noisy_seed42 (0.7759).
 - Model-level view:
-  - dcgan: Recall=0.2949, LPIPS-div=0.2810
-  - wgan_gp: Recall=0.2147, LPIPS-div=0.2838
-  - attention_gan: Recall=0.1403, LPIPS-div=0.2691
-  - combined: Recall=0.1885, LPIPS-div=0.2812
+  - dcgan: Recall=0.0851, LPIPS-div=0.2468
+  - wgan_gp: Recall=0.0085, LPIPS-div=0.2559
+  - attention_gan: Recall=0.2487, LPIPS-div=0.2748
+  - combined: Recall=0.1222, LPIPS-div=0.2983
 
 ### 3) Anti-Memorization (MiFID proxy)
 
 - Interpretation: lower MiFID proxy is better; it combines quality with nearest-neighbor overfitting risk.
 - Caveat: this is a practical proxy, not a strict theorem-level memorization proof.
-- Best MiFID proxy experiment: wgan_gp_celeba_full_data_seed42 (175.20).
+- Best MiFID proxy experiment: attention_gan_anime_faces_full_data_seed42 (70.99).
 - Model-level view (mean MiFID proxy):
-  - dcgan: 192.54
-  - wgan_gp: 204.50
-  - attention_gan: 247.99
-  - combined: 207.86
+  - dcgan: 256.15
+  - wgan_gp: 306.27
+  - attention_gan: 169.63
+  - combined: 239.78
 
 ### 4) Stability (G_std / D_std)
 
 - Interpretation: lower std suggests more stable optimization dynamics.
-- Most stable experiment by G_std: dcgan_celeba_low_data_seed42 (1.4270).
+- Most stable experiment by G_std: attention_gan_anime_faces_noisy_seed42 (1.2055).
 
 ### 5) Practical Model Takeaways
 
@@ -125,15 +125,15 @@
 
 ## Conclusions
 
-- Best FID: wgan_gp_celeba_full_data_seed42 (175.20).
-- Worst FID: attention_gan_celeba_full_data_seed42 (321.71).
-- Most stable (lowest G_std): dcgan_celeba_low_data_seed42 (1.4270).
-- Best KID (lower is better): combined_celeba_full_data_seed42 (0.208616).
-- Best Precision (higher is better): dcgan_celeba_full_data_seed42 (0.0000).
-- Best Recall (higher is better): dcgan_celeba_low_data_seed42 (0.3958).
-- Best LPIPS diversity (higher is better): wgan_gp_celeba_noisy_seed42 (0.2974).
-- Best 1-MS-SSIM diversity (higher is better): wgan_gp_celeba_noisy_seed42 (0.7592).
-- Best MiFID proxy (lower is better): wgan_gp_celeba_full_data_seed42 (175.20).
+- Best FID: attention_gan_anime_faces_full_data_seed42 (65.72).
+- Worst FID: combined_anime_faces_low_data_seed42 (364.22).
+- Most stable (lowest G_std): attention_gan_anime_faces_noisy_seed42 (1.2055).
+- Best KID (lower is better): attention_gan_anime_faces_full_data_seed42 (0.060512).
+- Best Precision (higher is better): attention_gan_anime_faces_full_data_seed42 (0.0034).
+- Best Recall (higher is better): attention_gan_anime_faces_full_data_seed42 (0.6410).
+- Best LPIPS diversity (higher is better): combined_anime_faces_noisy_seed42 (0.3056).
+- Best 1-MS-SSIM diversity (higher is better): combined_anime_faces_noisy_seed42 (0.7759).
+- Best MiFID proxy (lower is better): attention_gan_anime_faces_full_data_seed42 (70.99).
 - Lower FID indicates better generation quality and closer real-data distribution.
 - MiFID proxy is a practical anti-memorization proxy: it penalizes low nearest-neighbor LPIPS distance to real images.
 - Use the ranking table for final model selection and combine it with stability metrics (G_std, D_std).

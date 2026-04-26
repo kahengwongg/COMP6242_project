@@ -54,27 +54,55 @@ def get_device(device_arg='auto'):
 # Fixed real evaluation subset
 # ---------------------------------------------------------------------------
 
-def prepare_real_eval_images(data_dir, output_dir, num_samples, seed=0):
+def prepare_real_eval_images(data_dir, output_dir, num_samples, seed=0, img_size=64):
     """
     Prepare a fixed subset of real images for FID evaluation.
-    Copies images once; subsequent calls reuse the cache.
+
+    The real images are preprocessed to ``img_size`` x ``img_size`` PNGs using
+    the same deterministic Resize(img_size) + CenterCrop(img_size) pipeline the
+    training code applies (see utils/data_loader.get_transforms). This is
+    *required* for FID correctness: pytorch-fid loads PNGs from disk and
+    stretches them to 299x299 inside its Inception wrapper, so feeding raw
+    178x218 CelebA originals (while the generator outputs 64x64) creates a
+    resolution asymmetry that contaminates the feature distributions.
+
+    Subsequent calls reuse the cache provided the source path AND img_size
+    match what was used to build it.
 
     Args:
-        data_dir: root directory with training images
-        output_dir: where to store the fixed subset (e.g. data/eval_real_5000)
+        data_dir:    root directory with training images
+        output_dir:  where to store the fixed subset (e.g. data/eval_real_celeba_64px_10000)
         num_samples: number of real images to select
-        seed: random seed for subset selection (separate from training seed)
+        seed:        random seed for subset selection (separate from training seed)
+        img_size:    spatial size to resize+center-crop reals to. Must match the
+                     generator output size used at training time.
 
     Returns:
         output_dir path
     """
-    # Check if already prepared with correct count
+    # Cache invalidation:
+    # The marker stores both the source data_dir and the preprocessing params
+    # (img_size). Earlier code stored only data_dir, which silently reused
+    # caches built before this patch (raw 178x218 JPEGs) for runs that now
+    # expect preprocessed 64x64 PNGs.
+    marker_path = os.path.join(output_dir, '_source.txt')
+    abs_data_dir = os.path.abspath(data_dir)
+    expected_marker = f"{abs_data_dir}|img_size={img_size}|preproc=resize+centercrop"
+
     if os.path.isdir(output_dir):
         existing = [f for f in os.listdir(output_dir)
                      if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-        if len(existing) >= num_samples:
-            print(f"Using cached real image subset: {output_dir} ({len(existing)} images)")
+        cached_src = None
+        if os.path.exists(marker_path):
+            with open(marker_path) as f:
+                cached_src = f.read().strip()
+        if len(existing) >= num_samples and cached_src == expected_marker:
+            print(f"Using cached real image subset: {output_dir} ({len(existing)} images, {img_size}x{img_size})")
             return output_dir
+        # Stale / mismatched cache (different source or different preprocessing)
+        print(f"Cache at {output_dir} is stale or from a different source/preproc "
+              f"(cached={cached_src}, expected={expected_marker}). Rebuilding.")
+        shutil.rmtree(output_dir)
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -92,12 +120,31 @@ def prepare_real_eval_images(data_dir, output_dir, num_samples, seed=0):
     num_to_sample = min(num_samples, len(image_files))
     indices = rng.choice(len(image_files), num_to_sample, replace=False)
 
-    print(f"Preparing real image evaluation subset: {num_to_sample} images (seed={seed}) -> {output_dir}")
-    for i, idx in enumerate(tqdm(indices, desc='Copying real images')):
+    print(f"Preparing real image eval subset (preprocessed to {img_size}x{img_size}): "
+          f"{num_to_sample} images (seed={seed}) -> {output_dir}")
+
+    # Mirror the training preprocessing pipeline exactly:
+    #   Resize(img_size) sets the *shorter* edge to img_size (preserves AR)
+    #   CenterCrop(img_size) takes the central img_size x img_size square
+    # We do this on PIL (anti-aliased bilinear) and save as PNG so the FID
+    # path sees a clean lossless cache.
+    real_preproc = transforms.Compose([
+        transforms.Resize(img_size),
+        transforms.CenterCrop(img_size),
+    ])
+
+    for i, idx in enumerate(tqdm(indices, desc='Preprocessing real images')):
         src = image_files[idx]
-        ext = os.path.splitext(src)[1]
-        dst = os.path.join(output_dir, f'{i:05d}{ext}')
-        shutil.copy2(src, dst)
+        with Image.open(src) as im:
+            im = im.convert('RGB')
+            im = real_preproc(im)
+            dst = os.path.join(output_dir, f'{i:05d}.png')
+            im.save(dst, format='PNG')
+
+    # Write a marker capturing source + preprocessing params so future runs
+    # can verify the cache matches both data_dir and img_size.
+    with open(marker_path, 'w') as f:
+        f.write(expected_marker)
 
     return output_dir
 
@@ -125,17 +172,28 @@ def calculate_fid_pytorch_fid(real_dir, fake_dir, device, batch_size=64):
     from pytorch_fid import fid_score
 
     device_str = str(device)
-    # pytorch-fid expects 'cuda:0' style or 'cpu'
-    # MPS is not natively supported by pytorch-fid; fall back to CPU for feature extraction
-    if 'mps' in device_str:
-        device_str = 'cpu'
-
-    fid_value = fid_score.calculate_fid_given_paths(
-        [real_dir, fake_dir],
-        batch_size=batch_size,
-        device=device_str,
-        dims=2048,
-    )
+    # pytorch-fid accepts any torch device string ('cuda:0', 'mps', 'cpu').
+    # Historically MPS hit unsupported-op errors in older PyTorch; on PyTorch
+    # >= 2.x the Inception forward works on MPS and is ~10x faster than CPU on
+    # Apple Silicon. Try MPS first and only fall back to CPU if it errors.
+    try:
+        fid_value = fid_score.calculate_fid_given_paths(
+            [real_dir, fake_dir],
+            batch_size=batch_size,
+            device=device_str,
+            dims=2048,
+        )
+    except (RuntimeError, NotImplementedError) as e:
+        if 'mps' in device_str:
+            print(f"pytorch-fid failed on MPS ({e}); retrying on CPU...")
+            fid_value = fid_score.calculate_fid_given_paths(
+                [real_dir, fake_dir],
+                batch_size=batch_size,
+                device='cpu',
+                dims=2048,
+            )
+        else:
+            raise
     return float(fid_value)
 
 
@@ -151,7 +209,11 @@ def calculate_extra_metrics_torch_fidelity(real_dir, fake_dir, device):
         print("torch-fidelity not installed, skipping extra metrics (KID/IS/PRC).")
         return {}
 
+    # torch-fidelity (<=0.3.0) only exposes a `cuda` boolean — it has no native
+    # MPS path. On Apple Silicon we run this on CPU; it's slower but correct.
     use_cuda = device.type == 'cuda'
+    if device.type == 'mps':
+        print("[info] torch-fidelity has no MPS backend; running KID/IS/PRC on CPU.")
     try:
         metrics = calculate_metrics(
             input1=real_dir,
@@ -224,33 +286,60 @@ def calculate_diversity_metrics(fake_dir, device, num_pairs=512, pair_batch_size
     same = (i_idx == j_idx)
     j_idx[same] = (j_idx[same] + 1) % len(fake_paths)
 
-    lpips_model = lpips.LPIPS(net='alex').to(device)
-    lpips_model.eval()
+    # Try the caller's device (CUDA/MPS/CPU). If MPS trips on an unsupported
+    # op inside LPIPS/MS-SSIM, silently fall back to CPU so the run doesn't die.
+    compute_device = device
+    try:
+        lpips_model = lpips.LPIPS(net='alex').to(compute_device)
+        lpips_model.eval()
+    except Exception as e:
+        if device.type == 'mps':
+            print(f"[info] LPIPS init failed on MPS ({e}); retrying on CPU.")
+            compute_device = torch.device('cpu')
+            lpips_model = lpips.LPIPS(net='alex').to(compute_device)
+            lpips_model.eval()
+        else:
+            raise
 
     msssim_vals = []
     lpips_vals = []
 
-    with torch.no_grad():
-        for start in range(0, n_pairs, pair_batch_size):
-            end = min(start + pair_batch_size, n_pairs)
-            batch_i = i_idx[start:end]
-            batch_j = j_idx[start:end]
+    def _run_pairs(cur_device):
+        msssim_out = []
+        lpips_out = []
+        with torch.no_grad():
+            for start in range(0, n_pairs, pair_batch_size):
+                end = min(start + pair_batch_size, n_pairs)
+                batch_i = i_idx[start:end]
+                batch_j = j_idx[start:end]
 
-            a_list = [load_image_tensor(fake_paths[k], device) for k in batch_i]
-            b_list = [load_image_tensor(fake_paths[k], device) for k in batch_j]
-            a = torch.cat(a_list, dim=0)
-            b = torch.cat(b_list, dim=0)
+                a_list = [load_image_tensor(fake_paths[k], cur_device) for k in batch_i]
+                b_list = [load_image_tensor(fake_paths[k], cur_device) for k in batch_j]
+                a = torch.cat(a_list, dim=0)
+                b = torch.cat(b_list, dim=0)
 
-            # ms-ssim on 64x64 triggers internal size assertions; upsample only for this metric.
-            a_01 = (a + 1.0) / 2.0
-            b_01 = (b + 1.0) / 2.0
-            a_01_ms = F.interpolate(a_01, size=(256, 256), mode='bilinear', align_corners=False)
-            b_01_ms = F.interpolate(b_01, size=(256, 256), mode='bilinear', align_corners=False)
-            ms_vals = ms_ssim(a_01_ms, b_01_ms, data_range=1.0, size_average=False)
-            lp_vals = lpips_model(a, b).view(-1)
+                # ms-ssim on 64x64 triggers internal size assertions; upsample only for this metric.
+                a_01 = (a + 1.0) / 2.0
+                b_01 = (b + 1.0) / 2.0
+                a_01_ms = F.interpolate(a_01, size=(256, 256), mode='bilinear', align_corners=False)
+                b_01_ms = F.interpolate(b_01, size=(256, 256), mode='bilinear', align_corners=False)
+                ms_vals = ms_ssim(a_01_ms, b_01_ms, data_range=1.0, size_average=False)
+                lp_vals = lpips_model(a, b).view(-1)
 
-            msssim_vals.extend(ms_vals.detach().cpu().numpy().tolist())
-            lpips_vals.extend(lp_vals.detach().cpu().numpy().tolist())
+                msssim_out.extend(ms_vals.detach().cpu().numpy().tolist())
+                lpips_out.extend(lp_vals.detach().cpu().numpy().tolist())
+        return msssim_out, lpips_out
+
+    try:
+        msssim_vals, lpips_vals = _run_pairs(compute_device)
+    except (RuntimeError, NotImplementedError) as e:
+        if compute_device.type == 'mps':
+            print(f"[info] Diversity forward failed on MPS ({e}); retrying on CPU.")
+            compute_device = torch.device('cpu')
+            lpips_model = lpips_model.to(compute_device)
+            msssim_vals, lpips_vals = _run_pairs(compute_device)
+        else:
+            raise
 
     ms_mean = float(np.mean(msssim_vals)) if msssim_vals else None
     lp_mean = float(np.mean(lpips_vals)) if lpips_vals else None
@@ -300,28 +389,53 @@ def calculate_mifid_proxy(
     fake_sel = [fake_paths[i] for i in rng.choice(len(fake_paths), fake_n, replace=False)]
     real_sel = [real_paths[i] for i in rng.choice(len(real_paths), real_n, replace=False)]
 
-    lpips_model = lpips.LPIPS(net='alex').to(device)
-    lpips_model.eval()
+    # Same MPS safety as calculate_diversity_metrics: try caller's device, fall
+    # back to CPU only if MPS trips on an unsupported op.
+    compute_device = device
+    try:
+        lpips_model = lpips.LPIPS(net='alex').to(compute_device)
+        lpips_model.eval()
+    except Exception as e:
+        if device.type == 'mps':
+            print(f"[info] LPIPS init failed on MPS ({e}); retrying MiFID on CPU.")
+            compute_device = torch.device('cpu')
+            lpips_model = lpips.LPIPS(net='alex').to(compute_device)
+            lpips_model.eval()
+        else:
+            raise
 
-    nn_dists = []
-    with torch.no_grad():
-        # Preload real images in batches to reduce disk overhead
-        real_batches = []
-        for start in range(0, len(real_sel), real_batch_size):
-            chunk = real_sel[start:start + real_batch_size]
-            r = torch.cat([load_image_tensor(p, device) for p in chunk], dim=0)
-            real_batches.append(r)
+    def _run_mifid(cur_device):
+        nn = []
+        with torch.no_grad():
+            # Preload real images in batches to reduce disk overhead
+            real_batches = []
+            for start in range(0, len(real_sel), real_batch_size):
+                chunk = real_sel[start:start + real_batch_size]
+                r = torch.cat([load_image_tensor(p, cur_device) for p in chunk], dim=0)
+                real_batches.append(r)
 
-        for fp in tqdm(fake_sel, desc='MiFID proxy (NN LPIPS)'):
-            f = load_image_tensor(fp, device)
-            best = None
-            for rb in real_batches:
-                f_rep = f.repeat(rb.size(0), 1, 1, 1)
-                d = lpips_model(f_rep, rb).view(-1)
-                cur = float(d.min().item())
-                if best is None or cur < best:
-                    best = cur
-            nn_dists.append(best)
+            for fp in tqdm(fake_sel, desc='MiFID proxy (NN LPIPS)'):
+                f = load_image_tensor(fp, cur_device)
+                best = None
+                for rb in real_batches:
+                    f_rep = f.repeat(rb.size(0), 1, 1, 1)
+                    d = lpips_model(f_rep, rb).view(-1)
+                    cur = float(d.min().item())
+                    if best is None or cur < best:
+                        best = cur
+                nn.append(best)
+        return nn
+
+    try:
+        nn_dists = _run_mifid(compute_device)
+    except (RuntimeError, NotImplementedError) as e:
+        if compute_device.type == 'mps':
+            print(f"[info] MiFID forward failed on MPS ({e}); retrying on CPU.")
+            compute_device = torch.device('cpu')
+            lpips_model = lpips_model.to(compute_device)
+            nn_dists = _run_mifid(compute_device)
+        else:
+            raise
 
     if not nn_dists:
         return {}
@@ -596,6 +710,7 @@ def evaluate(args):
         model_name = config.get('model', 'dcgan')
         z_dim = config.get('z_dim', 100)
         condition = config.get('condition', 'full_data')
+        img_size = config.get('img_size', 64)
     else:
         # Infer from directory name, e.g. "attention_gan_low_data_seed42"
         exp_name = os.path.basename(args.exp_dir)
@@ -607,6 +722,7 @@ def evaluate(args):
                 break
         z_dim = 100
         condition = 'full_data'
+        img_size = 64
     
     print(f"Model: {model_name}, Condition: {condition}")
     
@@ -624,17 +740,33 @@ def evaluate(args):
     G = load_generator(model_name, checkpoint_path, z_dim, device)
     
     # ---- Prepare real images (fixed subset for fair comparison) ----
+    # The cache path includes:
+    #   - dataset_tag: avoid cross-dataset cache collisions (celeba vs anime_faces)
+    #   - img_size:    distinguish 64x64-preprocessed cache from raw or other sizes
+    #   - num_samples: distinguish 5k vs 10k caches
+    # This means the previous (raw 178x218) cache at eval_real_celeba_10000/
+    # is left untouched; the new preprocessed cache lives at
+    # eval_real_celeba_64px_10000/ and is built fresh on first run.
+    dataset_tag = os.path.basename(os.path.normpath(args.data_dir))
     real_eval_dir = os.path.join(
         os.path.dirname(args.data_dir.rstrip('/')),
-        f'eval_real_{args.num_samples}'
+        f'eval_real_{dataset_tag}_{img_size}px_{args.num_samples}'
     )
-    prepare_real_eval_images(args.data_dir, real_eval_dir, args.num_samples, seed=0)
+    prepare_real_eval_images(args.data_dir, real_eval_dir, args.num_samples,
+                             seed=0, img_size=img_size)
     
     # ---- Generate fake images to folder ----
     # Seed the generator for reproducible FID samples
     torch.manual_seed(0)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(0)
+    # Seed MPS RNG explicitly when available (torch.manual_seed seeds MPS on
+    # recent PyTorch, but torch.mps.manual_seed() is the authoritative path).
+    if hasattr(torch, 'mps') and torch.backends.mps.is_available():
+        try:
+            torch.mps.manual_seed(0)
+        except Exception:
+            pass
     fake_samples_dir = os.path.join(args.exp_dir, 'fid_samples')
     reuse_ok = False
     if args.reuse_fake_samples and os.path.isdir(fake_samples_dir):
@@ -672,15 +804,27 @@ def evaluate(args):
     if fid_value is None:
         feature_extractor = InceptionFeatureExtractor(device)
 
-        transform = get_transforms(img_size=64, augment=False)
+        # Deterministic eval transform: no flip, no noise, no augmentation.
+        # (get_transforms() now adds RandomHorizontalFlip for 'full_data' and
+        # Gaussian noise for 'noisy', both of which would corrupt FID features.)
+        transform = transforms.Compose([
+            transforms.Resize(64),
+            transforms.CenterCrop(64),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+        ])
+        # MPS + multi-worker DataLoader forking can deadlock on macOS; force
+        # single-worker loading on MPS. Keep user's num_workers on CUDA/CPU.
+        eval_num_workers = 0 if device.type == 'mps' else args.num_workers
+
         real_dataset = ImageFolderFlat(real_eval_dir, transform=transform)
         real_dataloader = DataLoader(real_dataset, batch_size=args.batch_size,
-                                      shuffle=False, num_workers=args.num_workers)
+                                      shuffle=False, num_workers=eval_num_workers)
 
         # Load generated samples as tensors for fallback path
         fake_dataset = ImageFolderFlat(fake_samples_dir, transform=transform)
         fake_dataloader = DataLoader(fake_dataset, batch_size=args.batch_size,
-                                      shuffle=False, num_workers=args.num_workers)
+                                      shuffle=False, num_workers=eval_num_workers)
 
         print("\nExtracting real image features (fallback)...")
         real_activations = get_activations(real_dataloader, feature_extractor,

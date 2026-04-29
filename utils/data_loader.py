@@ -90,25 +90,24 @@ def get_transforms(img_size: int = 64,
     """
     # Order matters:
     #   Resize -> CenterCrop operate on PIL images.
-    #   RandomHorizontalFlip also operates on PIL images (must come before ToTensor).
     #   ToTensor -> Normalize convert to tensor in [-1, 1].
     #   AddGaussianNoise operates on the normalized tensor.
+    #
+    # Preprocessing is fully deterministic across all conditions so that the
+    # generator's output distribution matches the natural (unaugmented) real
+    # distribution that FID is computed against. This keeps the train-time
+    # and eval-time data distributions aligned and avoids a symmetrization
+    # gap in FID for full_data. (RandomHorizontalFlip was briefly enabled
+    # for full_data, but reverted because the trained 24-experiment matrix
+    # was produced without it; re-enabling here would silently diverge any
+    # future re-run from the reported results.)
     base = [
         transforms.Resize(img_size),
         transforms.CenterCrop(img_size),
-    ]
-
-    # The project plan specifies random horizontal flip for full_data as a
-    # light augmentation to improve generalisation. Low-data and noisy keep
-    # deterministic preprocessing so each ablation stays isolated.
-    if condition == 'full_data':
-        base.append(transforms.RandomHorizontalFlip(p=0.5))
-
-    base.extend([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5],
                              std=[0.5, 0.5, 0.5]),   # maps [0,1] -> [-1,1]
-    ])
+    ]
 
     if condition == 'noisy':
         base.append(AddGaussianNoise(std=noise_std))
@@ -251,6 +250,12 @@ def get_dataloader(data_dir: str,
     global _WORKER_BASE_SEED
     _WORKER_BASE_SEED = seed
 
+    # persistent_workers=True keeps DataLoader workers alive across epochs,
+    # which avoids the per-epoch worker-respawn cycle. On macOS+MPS that cycle
+    # is the dominant source of file-descriptor leakage (each spawn allocates
+    # fresh shared-memory FDs that are not always released cleanly), so this
+    # flag is essential for long training runs on Mac and harmless elsewhere.
+    # It also gives a small speedup on Linux+CUDA by skipping worker setup.
     loader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -260,6 +265,7 @@ def get_dataloader(data_dir: str,
         drop_last=True,
         worker_init_fn=_worker_init_fn,
         generator=torch.Generator().manual_seed(seed),
+        persistent_workers=(num_workers > 0),
     )
 
     return loader

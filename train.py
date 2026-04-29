@@ -17,8 +17,20 @@ from datetime import datetime
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.multiprocessing as _mp
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+
+# macOS+MPS: switch shared-tensor passing from file_descriptor to file_system
+# strategy. The default 'file_descriptor' strategy consumes one FD per shared
+# tensor, which on macOS (default ulimit -n is 256-1024) accumulates over
+# long runs and can crash training with OSError: [Errno 24] Too many open
+# files (observed at epoch 52 of an AttentionGAN run). 'file_system' uses
+# tmpfs files instead, which are released cleanly between epochs. Linux+CUDA
+# is unaffected because pin_memory=True routes shared tensors through CUDA
+# IPC, not the FD path; this guard is a no-op on non-MPS devices.
+if torch.backends.mps.is_available():
+    _mp.set_sharing_strategy('file_system')
 
 from models.dcgan import DCGANGenerator, DCGANDiscriminator
 from models.wgan_gp import WGGANGenerator, WGGANDiscriminator, compute_gradient_penalty as wgan_gp_compute_gp

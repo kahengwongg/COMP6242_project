@@ -147,8 +147,13 @@ def train_dcgan_step(G, D, real_images, g_optimizer, d_optimizer, z_dim, device,
     g_loss.backward()
     g_optimizer.step()
 
-    d_real_mean = d_real_output.mean().item()
-    d_fake_mean = d_fake_output.mean().item()
+    # BCEWithLogitsLoss outputs raw logits; convert to probabilities for consistent monitoring
+    if isinstance(criterion, nn.BCEWithLogitsLoss):
+        d_real_mean = torch.sigmoid(d_real_output).mean().item()
+        d_fake_mean = torch.sigmoid(d_fake_output).mean().item()
+    else:
+        d_real_mean = d_real_output.mean().item()
+        d_fake_mean = d_fake_output.mean().item()
 
     return g_loss.item(), d_loss.item(), d_real_mean, d_fake_mean
 
@@ -214,9 +219,9 @@ def train(args):
     
     set_seed(args.seed)
     
-    # e.g. dcgan_anime_faces_full_data_seed42
+    # e.g. dcgan_anime_faces_full_data_seed42  (or with --exp_suffix _fix1_bce_logits)
     dataset_tag = os.path.basename(os.path.normpath(args.data_dir))
-    exp_name = f"{args.model}_{dataset_tag}_{args.condition}_seed{args.seed}"
+    exp_name = f"{args.model}_{dataset_tag}_{args.condition}_seed{args.seed}{args.exp_suffix}"
     exp_dir = os.path.join(args.exp_dir, exp_name)
     os.makedirs(exp_dir, exist_ok=True)
     
@@ -253,7 +258,11 @@ def train(args):
     
     g_optimizer, d_optimizer = get_optimizers(args.model, G, D)
     
-    criterion = nn.BCELoss()  # only used by DCGAN / AttentionGAN
+    # AttentionGAN D outputs raw logits (Sigmoid removed); BCEWithLogitsLoss avoids saturation
+    if args.model.lower() == 'attention_gan':
+        criterion = nn.BCEWithLogitsLoss()
+    else:
+        criterion = nn.BCELoss()  # DCGAN D still ends with Sigmoid
     
     # Held fixed for visual consistency across epochs
     fixed_noise = torch.randn(64, args.z_dim, device=device)
@@ -436,6 +445,8 @@ def main():
                         help='Dataset directory')
     parser.add_argument('--exp_dir', type=str, default='experiments',
                         help='Experiment results directory')
+    parser.add_argument('--exp_suffix', type=str, default='',
+                        help='Optional suffix appended to the auto-generated experiment name')
     parser.add_argument('--save_freq', type=int, default=10,
                         help='Save frequency (epochs)')
     parser.add_argument('--resume', type=str, default=None,

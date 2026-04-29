@@ -107,10 +107,9 @@ class AttentionGANDiscriminator(nn.Module):
         # 8x8 -> 4x4
         self.conv4 = ConvBlock(features_d * 4, features_d * 8, use_bn=True, use_leaky=True)
 
-        # Output layer
+        # Output layer — raw logits; loss function (BCEWithLogitsLoss) applies sigmoid internally
         self.output = nn.Sequential(
             nn.Conv2d(features_d * 8, 1, kernel_size=4, stride=1, padding=0, bias=False),
-            nn.Sigmoid()
         )
 
     def forward(self, x):

@@ -35,6 +35,8 @@ if torch.backends.mps.is_available():
 from models.dcgan import DCGANGenerator, DCGANDiscriminator
 from models.wgan_gp import WGGANGenerator, WGGANDiscriminator, compute_gradient_penalty as wgan_gp_compute_gp
 from models.attention_gan import AttentionGANGenerator, AttentionGANDiscriminator
+from models.attention_gan_bounded import (BoundedGGenerator, BoundedGDiscriminator,
+                                          BoundedGDGenerator, BoundedGDDiscriminator)
 from models.combined import CombinedGenerator, CombinedDiscriminator, compute_gradient_penalty as combined_compute_gp
 from models.layers import weights_init
 
@@ -77,7 +79,7 @@ def get_mem_mb():
 def get_models(model_name, z_dim=100, channels=3, device='cuda'):
     """Return (G, D) for the given model name, moved to device and weight-initialised."""
     model_name = model_name.lower()
-    
+
     if model_name == 'dcgan':
         G = DCGANGenerator(z_dim=z_dim, channels=channels)
         D = DCGANDiscriminator(channels=channels)
@@ -90,6 +92,12 @@ def get_models(model_name, z_dim=100, channels=3, device='cuda'):
     elif model_name == 'combined':
         G = CombinedGenerator(z_dim=z_dim, channels=channels)
         D = CombinedDiscriminator(channels=channels)
+    elif model_name == 'attention_gan_g_bounded':
+        G = BoundedGGenerator(z_dim=z_dim, channels=channels)
+        D = BoundedGDiscriminator(channels=channels)
+    elif model_name == 'attention_gan_gd_bounded':
+        G = BoundedGDGenerator(z_dim=z_dim, channels=channels)
+        D = BoundedGDDiscriminator(channels=channels)
     else:
         raise ValueError(f"Unknown model: {model_name}")
     
@@ -397,7 +405,8 @@ def main():
     
     # model
     parser.add_argument('--model', type=str, default='dcgan',
-                        choices=['dcgan', 'wgan_gp', 'attention_gan', 'combined'],
+                        choices=['dcgan', 'wgan_gp', 'attention_gan', 'combined',
+                                 'attention_gan_g_bounded', 'attention_gan_gd_bounded'],
                         help='Model type')
     parser.add_argument('--z_dim', type=int, default=100,
                         help='Latent vector dimension')

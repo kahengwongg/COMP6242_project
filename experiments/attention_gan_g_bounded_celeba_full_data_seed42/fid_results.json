@@ -1,0 +1,19 @@
+{
+  "fid_score": 132.07251071907706,
+  "fid_method": "custom-fallback",
+  "num_samples": 5000,
+  "model": "attention_gan_g_bounded",
+  "condition": "full_data",
+  "ms_ssim_mean": 0.46888439705071505,
+  "ms_ssim_diversity": 0.531115602949285,
+  "lpips_diversity_mean": 0.23142199179574163,
+  "lpips_diversity_std": 0.11267977739512501,
+  "diversity_pairs": 512,
+  "nn_lpips_mean": 0.17832810792606324,
+  "nn_lpips_p05": 0.12109550572931767,
+  "mifid_proxy": 146.38381671026553,
+  "memorization_risk": 0.1083594603696838,
+  "mifid_tau": 0.2,
+  "mifid_fake_probe_samples": 64,
+  "mifid_real_ref_samples": 512
+}

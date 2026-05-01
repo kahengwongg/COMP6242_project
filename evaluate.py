@@ -26,6 +26,7 @@ from tqdm import tqdm
 from models.dcgan import DCGANGenerator
 from models.wgan_gp import WGGANGenerator
 from models.attention_gan import AttentionGANGenerator
+from models.attention_gan_bounded import BoundedGGenerator, BoundedGDGenerator
 from models.combined import CombinedGenerator
 from utils.data_loader import ImageFolderFlat, get_transforms
 
@@ -680,6 +681,10 @@ def load_generator(model_name, checkpoint_path, z_dim=100, device='cuda'):
         G = AttentionGANGenerator(z_dim=z_dim)
     elif model_name == 'combined':
         G = CombinedGenerator(z_dim=z_dim)
+    elif model_name == 'attention_gan_g_bounded':
+        G = BoundedGGenerator(z_dim=z_dim)
+    elif model_name == 'attention_gan_gd_bounded':
+        G = BoundedGDGenerator(z_dim=z_dim)
     else:
         raise ValueError(f"Unknown model: {model_name}")
     
@@ -714,7 +719,8 @@ def evaluate(args):
     else:
         # Infer from directory name, e.g. "attention_gan_low_data_seed42"
         exp_name = os.path.basename(args.exp_dir)
-        known_models = ['attention_gan', 'wgan_gp', 'combined', 'dcgan']
+        known_models = ['attention_gan_g_bounded', 'attention_gan_gd_bounded',
+                        'attention_gan', 'wgan_gp', 'combined', 'dcgan']
         model_name = 'dcgan'
         for m in known_models:
             if exp_name.startswith(m):

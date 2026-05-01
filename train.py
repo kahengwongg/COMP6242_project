@@ -250,6 +250,12 @@ def train(args):
         noise_std=args.noise_std
     )
     
+    if len(dataloader) == 0:
+        raise RuntimeError(
+            f"Dataset at '{args.data_dir}' has fewer images than batch_size={args.batch_size}. "
+            "Check that the data directory is populated."
+        )
+
     G, D = get_models(args.model, args.z_dim, args.channels, device)
     
     g_params = sum(p.numel() for p in G.parameters())

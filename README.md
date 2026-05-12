@@ -315,13 +315,3 @@ Notes on interpretation:
 - Prefer the `pytorch-fid` FID values (`fid_method = "pytorch-fid"`); the custom torchvision-Inception fallback is provided for portability and produces values on a *different* feature-space scale that are not directly comparable to the `pytorch-fid` ones (see Evaluation methodology).
 - `mifid_proxy` in this repo is a practical anti-memorization proxy built from NN-LPIPS; use it as a risk signal rather than an absolute theorem-level proof.
 
-## References
-
-- Radford et al., "Unsupervised Representation Learning with Deep Convolutional Generative Adversarial Networks", ICLR 2016
-- Arjovsky et al., "Wasserstein GAN", ICML 2017
-- Gulrajani et al., "Improved Training of Wasserstein GANs", NeurIPS 2017
-- Zhang et al., "Self-Attention Generative Adversarial Networks", ICML 2019
-- Z. Wang, E. P. Simoncelli, and A. C. Bovik, "Multi-scale structural similarity for image quality assessment," in Proc. 37th Asilomar Conf. Signals, Systems and Computers, 2003, pp. 1398-1402.
-- R. Zhang, P. Isola, A. A. Efros, E. Shechtman, and O. Wang, "The Unreasonable Effectiveness of Deep Features as a Perceptual Metric," in Proc. IEEE/CVF Conf. on Computer Vision and Pattern Recognition (CVPR), 2018, pp. 586-595.
-- R. Webster, J. Rabin, L. Simon, and F. Jurie, "Detecting Overfitting of Deep Generative Networks via Latent Recovery," in Proc. IEEE/CVF Conf. on Computer Vision and Pattern Recognition (CVPR), 2019, pp. 11273-11282.
-- G. J. J. van den Burg and C. K. I. Williams, "On Memorization in Probabilistic Deep Generative Models," in Advances in Neural Information Processing Systems (NeurIPS), 2021.

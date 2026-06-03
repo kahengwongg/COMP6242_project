@@ -124,13 +124,14 @@ def train_dcgan_step(G, D, real_images, g_optimizer, d_optimizer, z_dim, device,
     
     real_labels = torch.ones(batch_size, 1, device=device)
     d_real_output = D(real_images)
-    d_real_loss = criterion(d_real_output, real_labels)
+    _bce_only = isinstance(criterion, nn.BCELoss)
+    d_real_loss = criterion(torch.sigmoid(d_real_output) if _bce_only else d_real_output, real_labels)
     
     z = torch.randn(batch_size, z_dim, device=device)
     fake_images = G(z).detach()  # detach: no G gradients during D update
     fake_labels = torch.zeros(batch_size, 1, device=device)
     d_fake_output = D(fake_images)
-    d_fake_loss = criterion(d_fake_output, fake_labels)
+    d_fake_loss = criterion(torch.sigmoid(d_fake_output) if _bce_only else d_fake_output, fake_labels)
     
     d_loss = d_real_loss + d_fake_loss
     d_loss.backward()
@@ -142,7 +143,7 @@ def train_dcgan_step(G, D, real_images, g_optimizer, d_optimizer, z_dim, device,
     z = torch.randn(batch_size, z_dim, device=device)
     fake_images = G(z)
     g_output = D(fake_images)
-    g_loss = criterion(g_output, real_labels)  # G wants D to output 1 on fakes
+    g_loss = criterion(torch.sigmoid(g_output) if _bce_only else g_output, real_labels)  # G wants D to output 1 on fakes
     
     g_loss.backward()
     g_optimizer.step()
@@ -258,9 +259,11 @@ def train(args):
     
     g_optimizer, d_optimizer = get_optimizers(args.model, G, D)
     
-    # AttentionGAN D outputs raw logits (Sigmoid removed); BCEWithLogitsLoss avoids saturation
-    if args.model.lower() == 'attention_gan':
-        criterion = nn.BCEWithLogitsLoss()
+    # Select loss criterion
+    if hasattr(args, 'loss_type') and args.loss_type == 'bce':
+        criterion = nn.BCELoss()
+    elif args.model.lower() == 'attention_gan':
+        criterion = nn.BCEWithLogitsLoss()  # default for attention_gan
     else:
         criterion = nn.BCELoss()  # DCGAN D still ends with Sigmoid
     
@@ -451,6 +454,9 @@ def main():
                         help='Save frequency (epochs)')
     parser.add_argument('--resume', type=str, default=None,
                         help='Resume training from checkpoint path')
+    parser.add_argument('--loss_type', type=str, default=None,
+                        choices=['bce', 'bce_logits'],
+                        help='Override loss function: bce=BCELoss, bce_logits=BCEWithLogitsLoss (default: auto-selected by model)')
     
     args = parser.parse_args()
     

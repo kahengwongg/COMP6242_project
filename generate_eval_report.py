@@ -19,7 +19,8 @@ from statistics import mean
 import matplotlib.pyplot as plt
 
 
-MODELS = ["dcgan", "wgan_gp", "attention_gan", "combined"]
+MODELS = ["dcgan", "wgan_gp", "attention_gan", "combined",
+          "attention_gan_g_bounded", "attention_gan_gd_bounded"]
 CONDITIONS = ["full_data", "low_data", "noisy"]
 
 

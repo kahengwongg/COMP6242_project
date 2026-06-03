@@ -66,6 +66,29 @@ class SelfAttention(nn.Module):
         return out
 
 
+class BoundedSelfAttention(SelfAttention):
+    """
+    Extension of SelfAttention with gamma clamped to [0, max_gamma].
+    Prevents attention from dominating feature maps and causing mode collapse.
+    Used in bounded-attention ablation experiments only; original SelfAttention
+    is left unchanged so Combined and AttentionGAN baselines are unaffected.
+    """
+
+    def __init__(self, in_channels, max_gamma=0.5):
+        super().__init__(in_channels)
+        self.max_gamma = max_gamma
+
+    def forward(self, x):
+        batch_size, C, H, W = x.size()
+        query = self.query_conv(x).view(batch_size, -1, H * W).permute(0, 2, 1)
+        key = self.key_conv(x).view(batch_size, -1, H * W)
+        value = self.value_conv(x).view(batch_size, -1, H * W)
+        attention = self.softmax(torch.bmm(query, key))
+        out = torch.bmm(value, attention.permute(0, 2, 1)).view(batch_size, C, H, W)
+        out = torch.clamp(self.gamma, 0, self.max_gamma) * out + x
+        return out
+
+
 class ConvBlock(nn.Module):
     """
     Basic convolution block.

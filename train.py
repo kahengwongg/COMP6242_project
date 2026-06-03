@@ -459,7 +459,7 @@ def main():
                         help='Noise standard deviation')
     
     # paths
-    parser.add_argument('--data_dir', type=str, default='data/anime_faces',
+    parser.add_argument('--data_dir', type=str, default='data/celeba',
                         help='Dataset directory')
     parser.add_argument('--exp_dir', type=str, default='experiments',
                         help='Experiment results directory')

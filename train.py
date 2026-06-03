@@ -123,22 +123,33 @@ def get_optimizers(model_name, G, D, lr_dcgan=2e-4, lr_wgan=1e-4):
     return g_optimizer, d_optimizer
 
 
-def train_dcgan_step(G, D, real_images, g_optimizer, d_optimizer, z_dim, device, criterion):
-    """One DCGAN update: D step then G step, both with BCE loss."""
+def train_dcgan_step(G, D, real_images, g_optimizer, d_optimizer, z_dim, device, criterion,
+                     d_outputs_logits=False):
+    """One DCGAN update: D step then G step, both with BCE loss.
+
+    d_outputs_logits: True if D emits raw logits (e.g. AttentionGAN). When the
+    criterion is BCELoss (which expects probabilities), we apply sigmoid
+    ourselves. DCGAN's D already ends in Sigmoid, so d_outputs_logits=False and
+    no extra sigmoid is applied (avoids the double-sigmoid bug).
+    """
     batch_size = real_images.size(0)
+
+    # Manually map logits -> probabilities only when D emits logits AND the loss
+    # expects probabilities. BCEWithLogitsLoss takes logits directly.
+    need_sigmoid_for_loss = d_outputs_logits and isinstance(criterion, nn.BCELoss)
     
     # D step
     d_optimizer.zero_grad()
     
     real_labels = torch.ones(batch_size, 1, device=device)
     d_real_output = D(real_images)
-    d_real_loss = criterion(d_real_output, real_labels)
+    d_real_loss = criterion(torch.sigmoid(d_real_output) if need_sigmoid_for_loss else d_real_output, real_labels)
     
     z = torch.randn(batch_size, z_dim, device=device)
     fake_images = G(z).detach()  # detach: no G gradients during D update
     fake_labels = torch.zeros(batch_size, 1, device=device)
     d_fake_output = D(fake_images)
-    d_fake_loss = criterion(d_fake_output, fake_labels)
+    d_fake_loss = criterion(torch.sigmoid(d_fake_output) if need_sigmoid_for_loss else d_fake_output, fake_labels)
     
     d_loss = d_real_loss + d_fake_loss
     d_loss.backward()
@@ -150,13 +161,19 @@ def train_dcgan_step(G, D, real_images, g_optimizer, d_optimizer, z_dim, device,
     z = torch.randn(batch_size, z_dim, device=device)
     fake_images = G(z)
     g_output = D(fake_images)
-    g_loss = criterion(g_output, real_labels)  # G wants D to output 1 on fakes
+    g_loss = criterion(torch.sigmoid(g_output) if need_sigmoid_for_loss else g_output, real_labels)  # G wants D to output 1 on fakes
     
     g_loss.backward()
     g_optimizer.step()
 
-    d_real_mean = d_real_output.mean().item()
-    d_fake_mean = d_fake_output.mean().item()
+    # Report D outputs as probabilities for consistent monitoring. When D emits
+    # raw logits, squash with sigmoid; DCGAN already outputs probabilities.
+    if d_outputs_logits:
+        d_real_mean = torch.sigmoid(d_real_output).mean().item()
+        d_fake_mean = torch.sigmoid(d_fake_output).mean().item()
+    else:
+        d_real_mean = d_real_output.mean().item()
+        d_fake_mean = d_fake_output.mean().item()
 
     return g_loss.item(), d_loss.item(), d_real_mean, d_fake_mean
 
@@ -222,9 +239,9 @@ def train(args):
     
     set_seed(args.seed)
     
-    # e.g. dcgan_anime_faces_full_data_seed42
+    # e.g. dcgan_anime_faces_full_data_seed42  (or with --exp_suffix _fix1_bce_logits)
     dataset_tag = os.path.basename(os.path.normpath(args.data_dir))
-    exp_name = f"{args.model}_{dataset_tag}_{args.condition}_seed{args.seed}"
+    exp_name = f"{args.model}_{dataset_tag}_{args.condition}_seed{args.seed}{args.exp_suffix}"
     exp_dir = os.path.join(args.exp_dir, exp_name)
     os.makedirs(exp_dir, exist_ok=True)
     
@@ -267,7 +284,17 @@ def train(args):
     
     g_optimizer, d_optimizer = get_optimizers(args.model, G, D)
     
-    criterion = nn.BCELoss()  # only used by DCGAN / AttentionGAN
+    # Select loss criterion. Default is BCELoss; explicit --loss_type overrides.
+    # AttentionGAN's D emits raw logits, but BCELoss is still valid because
+    # train_dcgan_step applies sigmoid when d_outputs_logits is True.
+    loss_type = getattr(args, 'loss_type', None)
+    if loss_type == 'bce_logits':
+        criterion = nn.BCEWithLogitsLoss()
+    else:
+        criterion = nn.BCELoss()  # default (loss_type None or 'bce')
+
+    # Only AttentionGAN's discriminator emits raw logits; DCGAN ends in Sigmoid.
+    d_outputs_logits = args.model.lower() == 'attention_gan'
     
     # Held fixed for visual consistency across epochs
     fixed_noise = torch.randn(64, args.z_dim, device=device)
@@ -324,7 +351,7 @@ def train(args):
             else:
                 g_loss, d_loss, d_real_mean, d_fake_mean = train_dcgan_step(
                     G, D, real_images, g_optimizer, d_optimizer,
-                    args.z_dim, device, criterion
+                    args.z_dim, device, criterion, d_outputs_logits=d_outputs_logits
                 )
                 g_losses.append(g_loss)
                 epoch_g_losses.append(g_loss)
@@ -447,14 +474,19 @@ def main():
                         help='Noise standard deviation')
     
     # paths
-    parser.add_argument('--data_dir', type=str, default='data/anime_faces',
+    parser.add_argument('--data_dir', type=str, default='data/celeba',
                         help='Dataset directory')
     parser.add_argument('--exp_dir', type=str, default='experiments',
                         help='Experiment results directory')
+    parser.add_argument('--exp_suffix', type=str, default='',
+                        help='Optional suffix appended to the auto-generated experiment name')
     parser.add_argument('--save_freq', type=int, default=10,
                         help='Save frequency (epochs)')
     parser.add_argument('--resume', type=str, default=None,
                         help='Resume training from checkpoint path')
+    parser.add_argument('--loss_type', type=str, default=None,
+                        choices=['bce', 'bce_logits'],
+                        help='Override loss function: bce=BCELoss, bce_logits=BCEWithLogitsLoss (default: auto-selected by model)')
     
     args = parser.parse_args()
     
